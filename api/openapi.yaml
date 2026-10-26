@@ -1,0 +1,299 @@
+openapi: 3.1.0
+info:
+  title: budget-planner API
+  version: 0.1.0
+  description: |
+    Mini App API. Every request carries Telegram Mini App init data:
+    `Authorization: tma <initData>`. The backend validates it with the bot token.
+
+    Money is always an integer in ISO 4217 minor units plus a currency code.
+    UZS and USD are never added together; totals are reported per currency.
+    Dates are calendar dates (YYYY-MM-DD) in the user's time zone.
+servers:
+  - url: /api
+security:
+  - tma: []
+
+paths:
+  /me:
+    get:
+      summary: Current user and settings
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+    patch:
+      summary: Update settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language: { $ref: "#/components/schemas/Language" }
+                main_currency: { $ref: "#/components/schemas/Currency" }
+                timezone: { type: string, example: Asia/Tashkent }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+
+  /accounts:
+    get:
+      summary: User's money accounts with current balances
+      parameters:
+        - { name: include_archived, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { accounts: { type: array, items: { $ref: "#/components/schemas/Account" } } } }
+    post:
+      summary: Create an account; a non-zero opening balance is recorded as an opening transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, currency]
+              properties:
+                name: { type: string, maxLength: 64 }
+                type: { $ref: "#/components/schemas/AccountType" }
+                currency: { $ref: "#/components/schemas/Currency" }
+                opening_balance_minor: { type: integer, format: int64, default: 0 }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /accounts/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    patch:
+      summary: Rename or archive an account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                archived: { type: boolean }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /categories:
+    get:
+      summary: Default and user categories
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { categories: { type: array, items: { $ref: "#/components/schemas/Category" } } } }
+
+  /transactions:
+    get:
+      summary: History, newest first, cursor-paginated
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: account_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: category_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/TransactionType" } }
+        - { name: currency, in: query, schema: { $ref: "#/components/schemas/Currency" } }
+        - { name: q, in: query, description: Search in description, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions: { type: array, items: { $ref: "#/components/schemas/Transaction" } }
+                  next_cursor: { type: [string, "null"] }
+    post:
+      summary: Record income, expense, transfer or currency exchange
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TransactionInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "200": { description: Already recorded (same source_ref), content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /transactions/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      summary: One transaction
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Replace a transaction (edit)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TransactionInput" } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      summary: Delete (soft); can be undone with restore
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /transactions/{id}/restore:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    post:
+      summary: Undo a delete
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /summary:
+    get:
+      summary: Home screen data for one month
+      parameters:
+        - { name: month, in: query, description: "YYYY-MM; default current month in user's time zone", schema: { type: string, pattern: "^\\d{4}-\\d{2}$" } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Summary" } } } }
+
+components:
+  securitySchemes:
+    tma:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "`tma <initData>` from Telegram.WebApp.initData"
+
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+
+  responses:
+    NotFound:
+      description: Not found or not owned by the user
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Invalid:
+      description: Validation failed
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: invalid_amount }
+            message: { type: string }
+            field: { type: string }
+
+    Currency: { type: string, enum: [UZS, USD] }
+    Language: { type: string, enum: [uz-Latn, uz-Cyrl, ru, en] }
+    AccountType: { type: string, enum: [cash, humo, uzcard, visa, mastercard, savings, other] }
+    TransactionType:
+      type: string
+      enum: [expense, income, transfer, exchange, opening]
+      description: |
+        transfer: between own accounts in one currency (never income or expense).
+        exchange: between own accounts in different currencies.
+        opening: opening balance, created by the server only.
+    Source: { type: string, enum: [manual, chat, voice, bank, receipt] }
+
+    Money:
+      type: object
+      required: [amount_minor, currency]
+      properties:
+        amount_minor: { type: integer, format: int64 }
+        currency: { $ref: "#/components/schemas/Currency" }
+
+    User:
+      type: object
+      required: [id, telegram_id, first_name, language, main_currency, timezone]
+      properties:
+        id: { type: integer, format: int64 }
+        telegram_id: { type: integer, format: int64 }
+        first_name: { type: string }
+        username: { type: [string, "null"] }
+        language: { $ref: "#/components/schemas/Language" }
+        main_currency: { $ref: "#/components/schemas/Currency" }
+        timezone: { type: string }
+        onboarded: { type: boolean, description: True once the user has at least one account }
+
+    Account:
+      type: object
+      required: [id, name, type, currency, balance_minor, archived]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/AccountType" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        balance_minor: { type: integer, format: int64 }
+        archived: { type: boolean }
+
+    Category:
+      type: object
+      required: [id, kind, key, icon]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { type: string, enum: [expense, income] }
+        key: { type: [string, "null"], description: i18n key for default categories, e.g. "taxi"; null for custom }
+        name: { type: [string, "null"], description: Custom name; null for defaults (translate key) }
+        icon: { type: string, description: Emoji }
+
+    TransactionInput:
+      type: object
+      required: [type, occurred_on, amount_minor, account_id]
+      properties:
+        type: { type: string, enum: [expense, income, transfer, exchange] }
+        occurred_on: { type: string, format: date }
+        amount_minor: { type: integer, format: int64, minimum: 1, description: Positive; in account_id's currency }
+        account_id: { type: integer, format: int64, description: Source account for expense/transfer/exchange, target for income }
+        to_account_id: { type: integer, format: int64, description: Required for transfer and exchange }
+        to_amount_minor: { type: integer, format: int64, minimum: 1, description: Required for exchange; in to_account_id's currency }
+        category_id: { type: integer, format: int64, description: Required for expense and income }
+        description: { type: string, maxLength: 200 }
+        source: { $ref: "#/components/schemas/Source" }
+        source_ref: { type: string, description: Idempotency key, e.g. Telegram update id; repeats return the existing transaction }
+
+    Transaction:
+      type: object
+      required: [id, type, occurred_on, amount_minor, currency, account_id, description, source, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        type: { $ref: "#/components/schemas/TransactionType" }
+        occurred_on: { type: string, format: date }
+        amount_minor: { type: integer, format: int64 }
+        currency: { $ref: "#/components/schemas/Currency" }
+        account_id: { type: integer, format: int64 }
+        to_account_id: { type: [integer, "null"], format: int64 }
+        to_amount_minor: { type: [integer, "null"], format: int64 }
+        to_currency: { oneOf: [{ $ref: "#/components/schemas/Currency" }, { type: "null" }] }
+        category_id: { type: [integer, "null"], format: int64 }
+        description: { type: string }
+        source: { $ref: "#/components/schemas/Source" }
+        created_at: { type: string, format: date-time }
+
+    Summary:
+      type: object
+      required: [month, balances, income, expense, by_category, recent]
+      properties:
+        month: { type: string, example: 2026-10 }
+        balances: { type: array, description: Total of asset accounts per currency, items: { $ref: "#/components/schemas/Money" } }
+        income: { type: array, items: { $ref: "#/components/schemas/Money" } }
+        expense: { type: array, items: { $ref: "#/components/schemas/Money" } }
+        by_category:
+          type: array
+          description: Expense per category and currency, largest first
+          items:
+            type: object
+            required: [category_id, amount_minor, currency]
+            properties:
+              category_id: { type: integer, format: int64 }
+              amount_minor: { type: integer, format: int64 }
+              currency: { $ref: "#/components/schemas/Currency" }
+        recent: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/Transaction" } }

@@ -1,0 +1,84 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens. Telegram injects --tg-theme-* on <html>; outside Telegram the
+ * fallbacks below apply, switched by data-scheme (set in lib/telegram.ts).
+ */
+:root {
+  --fb-bg: #ffffff;
+  --fb-secondary-bg: #f1f2f6;
+  --fb-text: #000000;
+  --fb-hint: #8a8f99;
+  --fb-link: #2481cc;
+  --fb-button: #2481cc;
+  --fb-button-text: #ffffff;
+  --fb-section-bg: #ffffff;
+  --fb-separator: #e6e7eb;
+  --fb-destructive: #d63a3a;
+  --income: #1f9d55;
+  --expense: #d63a3a;
+  color-scheme: light;
+}
+
+:root[data-scheme='dark'] {
+  --fb-bg: #17212b;
+  --fb-secondary-bg: #0e1621;
+  --fb-text: #f5f5f5;
+  --fb-hint: #8b98a5;
+  --fb-link: #6ab3f3;
+  --fb-button: #5288c1;
+  --fb-button-text: #ffffff;
+  --fb-section-bg: #17212b;
+  --fb-separator: #2b3846;
+  --fb-destructive: #ec5f5f;
+  --income: #4fc27d;
+  --expense: #ef6b6b;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--tg-theme-bg-color, var(--fb-bg));
+  --color-surface: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, var(--fb-section-bg)));
+  --color-page: var(--tg-theme-secondary-bg-color, var(--fb-secondary-bg));
+  --color-text: var(--tg-theme-text-color, var(--fb-text));
+  --color-hint: var(--tg-theme-hint-color, var(--fb-hint));
+  --color-link: var(--tg-theme-link-color, var(--fb-link));
+  --color-accent: var(--tg-theme-button-color, var(--fb-button));
+  --color-on-accent: var(--tg-theme-button-text-color, var(--fb-button-text));
+  --color-separator: var(--tg-theme-section-separator-color, var(--fb-separator));
+  --color-danger: var(--tg-theme-destructive-text-color, var(--fb-destructive));
+  --color-income: var(--income);
+  --color-expense: var(--expense);
+}
+
+:root {
+  --safe-top: max(env(safe-area-inset-top), calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)));
+  --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
+  --tabbar-h: 64px;
+}
+
+html,
+body {
+  @apply bg-page text-text;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility pressable {
+  transition: transform 80ms ease, opacity 80ms ease;
+  &:active {
+    transform: scale(0.97);
+    opacity: 0.8;
+  }
+}

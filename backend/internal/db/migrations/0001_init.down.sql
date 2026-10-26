@@ -1,0 +1,9 @@
+drop table audit_log;
+drop table postings;
+drop function postings_balanced;
+drop table transactions;
+drop table categories;
+drop table accounts;
+drop table household_members;
+drop table households;
+drop table users;
