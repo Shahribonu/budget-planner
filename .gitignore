@@ -1,0 +1,18 @@
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Go
+/backend/bin/
+*.test
+coverage.out
+
+# Node / Mini App
+node_modules/
+dist/
