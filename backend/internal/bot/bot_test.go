@@ -3,6 +3,7 @@ package bot_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"github.com/Shahribonu/budget-planner/backend/internal/bot"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
@@ -47,6 +49,9 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.calls = append(f.calls, call{method, body})
 	f.mu.Unlock()
 	result := any(true)
+	if method == "createInvoiceLink" {
+		result = "https://t.me/$invoice"
+	}
 	if method == "getFile" {
 		result = map[string]any{"file_id": "f", "file_path": "voice/1.oga", "file_size": 15}
 	}
@@ -79,7 +84,9 @@ func setup(t *testing.T, transcriber stt.Transcriber) *harness {
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 	l := ledger.New(pool)
-	b := bot.New(bot.Config{MiniAppURL: "https://app.example"}, telegram.New("TOKEN").WithBaseURL(srv.URL), pool, capture.New(pool, l, nil), planning.NewService(pool, l), transcriber)
+	tg := telegram.New("TOKEN").WithBaseURL(srv.URL)
+	b := bot.New(bot.Config{MiniAppURL: "https://app.example"}, tg, pool, capture.New(pool, l, nil), planning.NewService(pool, l),
+		billing.New(pool, tg, billing.Prices{MonthlyStars: 150, YearlyStars: 1500}), transcriber)
 	return &harness{t: t, b: b, tg: fake, userID: rand.Int64N(1 << 50), update: rand.Int64N(1 << 40)}
 }
 
@@ -489,6 +496,119 @@ func TestPlanFlowAndPurchaseMatch(t *testing.T) {
 		if it.Title == "Krossovka" && (it.Status != "bought" || it.TransactionID == nil) {
 			t.Errorf("item = %+v", it)
 		}
+	}
+}
+
+func TestPremiumPayment(t *testing.T) {
+	pool := testdb.Pool(t)
+	h := setup(t, stt.None{})
+	h.b.HandleUpdate(ctx, h.message("/premium"))
+	calls := h.tg.take()
+	if n := len(sent(calls, "createInvoiceLink")); n != 2 {
+		t.Fatalf("invoice links = %d", n)
+	}
+	var monthly map[string]any
+	for _, c := range sent(calls, "createInvoiceLink") {
+		if c.body["subscription_period"] != nil {
+			monthly = c.body
+		}
+	}
+	if monthly == nil || monthly["currency"] != "XTR" || monthly["subscription_period"].(float64) != 2592000 {
+		t.Fatalf("monthly invoice = %v", monthly)
+	}
+	payload := monthly["payload"].(string)
+
+	precheck := func(amount int, from int64) bool {
+		h.update++
+		h.b.HandleUpdate(ctx, telegram.Update{UpdateID: h.update, PreCheckoutQuery: &telegram.PreCheckoutQuery{
+			ID: "pc", From: telegram.User{ID: from}, Currency: "XTR", TotalAmount: amount, InvoicePayload: payload}})
+		ans := sent(h.tg.take(), "answerPreCheckoutQuery")
+		return len(ans) == 1 && ans[0].body["ok"] == true
+	}
+	if !precheck(150, h.userID) {
+		t.Error("valid pre-checkout refused")
+	}
+	if precheck(1, h.userID) {
+		t.Error("wrong price approved")
+	}
+	if precheck(150, h.userID+1) {
+		t.Error("someone else's payload approved")
+	}
+
+	expires := time.Now().Add(30 * 24 * time.Hour).Unix()
+	pay := func() telegram.Update {
+		u := h.message("")
+		u.Message.SuccessfulPayment = &telegram.SuccessfulPayment{Currency: "XTR", TotalAmount: 150, InvoicePayload: payload,
+			SubscriptionExpirationDate: expires, IsRecurring: true, TelegramPaymentChargeID: fmt.Sprintf("charge-%d", h.userID)}
+		return u
+	}
+	h.b.HandleUpdate(ctx, pay())
+	if msgs := sent(h.tg.take(), "sendMessage"); len(msgs) != 1 || !strings.Contains(msgs[0].body["text"].(string), "Rahmat") {
+		t.Errorf("thanks = %+v", msgs)
+	}
+	// The same charge delivered again (a new update id) is not counted twice.
+	h.b.HandleUpdate(ctx, pay())
+	if msgs := sent(h.tg.take(), "sendMessage"); len(msgs) != 0 {
+		t.Errorf("duplicate payment replied: %+v", msgs)
+	}
+	var until time.Time
+	var n int
+	_ = pool.QueryRow(ctx, `select premium_until from users where telegram_id = $1`, h.userID).Scan(&until)
+	_ = pool.QueryRow(ctx, `select count(*) from payments p join users u on u.id = p.user_id where u.telegram_id = $1`, h.userID).Scan(&n)
+	if until.Unix() != expires || n != 1 {
+		t.Errorf("premium until %v (want %v), payments %d", until, time.Unix(expires, 0), n)
+	}
+}
+
+func TestTrialAfterSevenLoggedDays(t *testing.T) {
+	pool := testdb.Pool(t)
+	h := setup(t, stt.None{})
+	h.b.HandleUpdate(ctx, h.message("/start"))
+	h.b.HandleUpdate(ctx, h.message("taksi 25 ming"))
+	h.tg.take()
+	var userID, cash, taxi int64
+	_ = pool.QueryRow(ctx, `select id from users where telegram_id = $1`, h.userID).Scan(&userID)
+	_ = pool.QueryRow(ctx, `select id from accounts where user_id = $1 and kind = 'asset'`, userID).Scan(&cash)
+	_ = pool.QueryRow(ctx, `select id from categories where key = 'taxi'`).Scan(&taxi)
+	l := ledger.New(pool)
+	for d := 1; d <= 6; d++ {
+		if _, _, err := l.Record(ctx, userID, ledger.Input{Type: ledger.Expense, OccurredOn: time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -d),
+			AmountMinor: 100, AccountID: cash, CategoryID: &taxi, Source: "manual"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	summaryText := func() string {
+		_, _ = pool.Exec(ctx, `update users set last_summary_on = null, notify_time = (now() at time zone timezone)::time - interval '1 minute' where id = $1`, userID)
+		h.b.Tick(ctx)
+		for _, m := range sent(h.tg.take(), "sendMessage") {
+			if txt := m.body["text"].(string); int64(m.body["chat_id"].(float64)) == h.userID && strings.Contains(txt, "xulosa") {
+				return txt
+			}
+		}
+		return ""
+	}
+	if txt := summaryText(); !strings.Contains(txt, "Premium") {
+		t.Errorf("no trial after 7 days:\n%s", txt)
+	}
+	if txt := summaryText(); strings.Contains(txt, "🎁") {
+		t.Errorf("trial offered twice:\n%s", txt)
+	}
+	// With the trial active, a second budget is allowed.
+	cats := map[string]int64{}
+	rows, _ := pool.Query(ctx, `select key, id from categories where user_id is null`)
+	for rows.Next() {
+		var k string
+		var id int64
+		_ = rows.Scan(&k, &id)
+		cats[k] = id
+	}
+	rows.Close()
+	if _, err := l.CreateBudget(ctx, userID, nil, "UZS", 100); err != nil {
+		t.Fatal(err)
+	}
+	cafe := cats["cafe"]
+	if _, err := l.CreateBudget(ctx, userID, &cafe, "UZS", 100); err != nil {
+		t.Errorf("second budget during trial: %v", err)
 	}
 }
 

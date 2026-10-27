@@ -238,7 +238,7 @@ func (q *Queries) GetPendingDraft(ctx context.Context, arg GetPendingDraftParams
 }
 
 const getUserByTelegramID = `-- name: GetUserByTelegramID :one
-select id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month from users where telegram_id = $1
+select id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at from users where telegram_id = $1
 `
 
 func (q *Queries) GetUserByTelegramID(ctx context.Context, telegramID int64) (User, error) {
@@ -260,6 +260,8 @@ func (q *Queries) GetUserByTelegramID(ctx context.Context, telegramID int64) (Us
 		&i.ChatMode,
 		&i.ChatModeUntil,
 		&i.PlanPromptedMonth,
+		&i.PremiumUntil,
+		&i.TrialStartedAt,
 	)
 	return i, err
 }
@@ -417,7 +419,7 @@ update users
 set notify_enabled = coalesce($1, notify_enabled),
     notify_time    = coalesce($2::time, notify_time)
 where id = $3
-returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month
+returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at
 `
 
 type SetNotifyParams struct {
@@ -445,6 +447,8 @@ func (q *Queries) SetNotify(ctx context.Context, arg SetNotifyParams) (User, err
 		&i.ChatMode,
 		&i.ChatModeUntil,
 		&i.PlanPromptedMonth,
+		&i.PremiumUntil,
+		&i.TrialStartedAt,
 	)
 	return i, err
 }
@@ -482,7 +486,7 @@ func (q *Queries) UpsertMerchantRule(ctx context.Context, arg UpsertMerchantRule
 }
 
 const usersDueForSummary = `-- name: UsersDueForSummary :many
-select u.id, u.telegram_id, u.first_name, u.username, u.language, u.main_currency, u.timezone, u.created_at, u.started_at, u.notify_enabled, u.notify_time, u.last_summary_on, u.chat_mode, u.chat_mode_until, u.plan_prompted_month from users u
+select u.id, u.telegram_id, u.first_name, u.username, u.language, u.main_currency, u.timezone, u.created_at, u.started_at, u.notify_enabled, u.notify_time, u.last_summary_on, u.chat_mode, u.chat_mode_until, u.plan_prompted_month, u.premium_until, u.trial_started_at from users u
 where u.notify_enabled and u.started_at is not null
   -- within two hours after notify_time; time arithmetic wraps at midnight
   and case when u.notify_time + interval '2 hours' > u.notify_time
@@ -520,6 +524,8 @@ func (q *Queries) UsersDueForSummary(ctx context.Context) ([]User, error) {
 			&i.ChatMode,
 			&i.ChatModeUntil,
 			&i.PlanPromptedMonth,
+			&i.PremiumUntil,
+			&i.TrialStartedAt,
 		); err != nil {
 			return nil, err
 		}

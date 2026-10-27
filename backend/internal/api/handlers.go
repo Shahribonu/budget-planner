@@ -2,6 +2,8 @@ package api
 
 import (
 	"fmt"
+
+	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,8 +26,11 @@ type userJSON struct {
 	Timezone     string  `json:"timezone"`
 	Onboarded    bool    `json:"onboarded"`
 	// Evening summary in the bot.
-	NotifyEnabled bool   `json:"notify_enabled"`
-	NotifyTime    string `json:"notify_time"` // HH:MM in Timezone
+	NotifyEnabled bool       `json:"notify_enabled"`
+	NotifyTime    string     `json:"notify_time"` // HH:MM in Timezone
+	Premium       bool       `json:"premium"`
+	PremiumUntil  *time.Time `json:"premium_until"`
+	TrialUsed     bool       `json:"trial_used"`
 }
 
 func clock(t pgtype.Time) string {
@@ -39,7 +44,8 @@ func (s *Server) userResponse(w http.ResponseWriter, r *http.Request, u dbq.User
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, userJSON{u.ID, u.TelegramID, u.FirstName, u.Username, u.Language, u.MainCurrency, u.Timezone, onboarded, u.NotifyEnabled, clock(u.NotifyTime)})
+	writeJSON(w, http.StatusOK, userJSON{u.ID, u.TelegramID, u.FirstName, u.Username, u.Language, u.MainCurrency, u.Timezone, onboarded,
+		u.NotifyEnabled, clock(u.NotifyTime), billing.Active(u, s.now()), u.PremiumUntil, u.TrialStartedAt != nil})
 }
 
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
@@ -447,4 +453,30 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		"i_owe":        toMoneyJSON(sum.IOwe),
 		"installments": toMoneyJSON(sum.Installments),
 	})
+}
+
+// createInvoice returns a Telegram Stars payment link for Telegram.WebApp.openInvoice.
+func (s *Server) createInvoice(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Billing == nil {
+		writeError(w, http.StatusServiceUnavailable, "billing_unavailable", "", "payments are not configured")
+		return
+	}
+	var in struct {
+		Plan string `json:"plan"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Plan != billing.Monthly && in.Plan != billing.Yearly {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_plan", "plan", "plan must be monthly or yearly")
+		return
+	}
+	link, err := s.cfg.Billing.InvoiceLink(r.Context(), userID(r), in.Plan, "Premium", "Unlimited budgets")
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	p := s.cfg.Billing.Prices()
+	stars := map[string]int{billing.Monthly: p.MonthlyStars, billing.Yearly: p.YearlyStars}[in.Plan]
+	writeJSON(w, http.StatusOK, map[string]any{"url": link, "stars": stars})
 }

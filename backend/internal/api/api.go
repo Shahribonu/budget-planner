@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/auth"
+	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
 	"github.com/Shahribonu/budget-planner/backend/internal/planning"
@@ -30,6 +31,8 @@ type Config struct {
 	DevAuth bool
 	// TelegramWebhook, when set, is served at POST /telegram/webhook.
 	TelegramWebhook http.Handler
+	// Billing creates Stars invoices; nil disables POST /api/billing/invoice.
+	Billing *billing.Service
 }
 
 type Server struct {
@@ -88,6 +91,7 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 		r.Post("/plan/parse", s.parsePlanText)
 		r.Patch("/plan/items/{id}", s.patchPlanItem)
 		r.Delete("/plan/items/{id}", s.deletePlanItem)
+		r.Post("/billing/invoice", s.createInvoice)
 		r.Get("/recurring", s.listRecurring)
 		r.Post("/recurring", s.createRecurring)
 		r.Patch("/recurring/{id}", s.patchRecurring)

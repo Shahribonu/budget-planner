@@ -10,6 +10,9 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 )
 
+// FreeBudgets is how many budgets the free plan allows.
+const FreeBudgets = 1
+
 // Budget is a monthly limit, overall (CategoryID nil) or for one expense category.
 type Budget struct {
 	ID         int64
@@ -27,6 +30,20 @@ func (s *Service) CreateBudget(ctx context.Context, userID int64, categoryID *in
 		return Budget{}, invalid("invalid_amount", "amount_minor", "amount must be positive")
 	}
 	q := dbq.New(s.pool)
+	// Free plan: one budget. Premium: unlimited. Budgets made while Premium stay after it ends.
+	u, err := q.GetUser(ctx, userID)
+	if err != nil {
+		return Budget{}, err
+	}
+	if u.PremiumUntil == nil || !u.PremiumUntil.After(s.now()) {
+		n, err := q.CountActiveBudgets(ctx, userID)
+		if err != nil {
+			return Budget{}, err
+		}
+		if n >= FreeBudgets {
+			return Budget{}, invalid("premium_required", "category_id", "more than one budget needs Premium")
+		}
+	}
 	if categoryID != nil {
 		c, err := q.GetCategory(ctx, dbq.GetCategoryParams{ID: *categoryID, UserID: &userID})
 		if err != nil || c.Kind != "expense" {

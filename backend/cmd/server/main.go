@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/api"
+	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"github.com/Shahribonu/budget-planner/backend/internal/bot"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/llm"
@@ -68,11 +70,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	prices := billing.Prices{MonthlyStars: atoi(getenv("PREMIUM_MONTHLY_STARS", "150")), YearlyStars: atoi(getenv("PREMIUM_YEARLY_STARS", "1500"))}
 	cfg := api.Config{BotToken: botToken, DevAuth: env == "development"}
+	if botToken != "" {
+		cfg.Billing = billing.New(pool, telegram.New(botToken), prices)
+	}
 
 	if botToken != "" {
 		tg := telegram.New(botToken)
-		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capture.New(pool, l, ai), planning.NewService(pool, l), transcriber)
+		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capture.New(pool, l, ai), planning.NewService(pool, l), billing.New(pool, tg, prices), transcriber)
 		mode := getenv("BOT_MODE", map[bool]string{true: "polling", false: "webhook"}[env == "development"])
 		switch mode {
 		case "polling":
@@ -122,6 +128,14 @@ func run() error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdown)
+}
+
+func atoi(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		panic("invalid number in env: " + s)
+	}
+	return n
 }
 
 func getenv(key, def string) string {

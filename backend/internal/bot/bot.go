@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/bank"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
@@ -42,21 +43,31 @@ type Bot struct {
 	q       *dbq.Queries
 	capture *capture.Service
 	plan    *planning.Service
+	billing *billing.Service
 	stt     stt.Transcriber
 	now     func() time.Time
 }
 
-func New(cfg Config, tg *telegram.Client, pool *pgxpool.Pool, c *capture.Service, p *planning.Service, t stt.Transcriber) *Bot {
-	return &Bot{cfg: cfg, tg: tg, q: dbq.New(pool), capture: c, plan: p, stt: t, now: time.Now}
+func New(cfg Config, tg *telegram.Client, pool *pgxpool.Pool, c *capture.Service, p *planning.Service, bl *billing.Service, t stt.Transcriber) *Bot {
+	return &Bot{cfg: cfg, tg: tg, q: dbq.New(pool), capture: c, plan: p, billing: bl, stt: t, now: time.Now}
 }
 
 // HandleUpdate processes one update. It is safe to call more than once for the same
 // update: repeats are dropped.
 func (b *Bot) HandleUpdate(ctx context.Context, upd telegram.Update) {
+	if q := upd.PreCheckoutQuery; q != nil {
+		// Answered at once: Telegram cancels the payment after 10 seconds.
+		if err := b.billing.PreCheckout(ctx, *q); err != nil {
+			slog.Error("bot: pre-checkout", "err", err)
+		}
+		return
+	}
 	var from *telegram.User
 	var chat telegram.Chat
 	kind := ""
 	switch {
+	case upd.Message != nil && upd.Message.SuccessfulPayment != nil:
+		from, chat, kind = upd.Message.From, upd.Message.Chat, "payment"
 	case upd.Message != nil:
 		from, chat = upd.Message.From, upd.Message.Chat
 		switch {
@@ -96,6 +107,8 @@ func (b *Bot) HandleUpdate(ctx context.Context, upd telegram.Update) {
 		b.voice(ctx, u, upd.Message)
 	case "callback":
 		b.callback(ctx, u, upd.CallbackQuery)
+	case "payment":
+		b.paid(ctx, u, upd.Message)
 	}
 }
 
@@ -183,6 +196,8 @@ func (b *Bot) command(ctx context.Context, u dbq.User, m *telegram.Message) {
 		}
 	case "/plan":
 		b.startPlan(ctx, u, m.Chat.ID)
+	case "/premium":
+		b.premium(ctx, u, m.Chat.ID)
 	case "/lang":
 		b.send(ctx, m.Chat.ID, i18n.T(lang, "lang.choose"), languageKeyboard(), 0)
 	case "/settings":
@@ -467,4 +482,48 @@ func (b *Bot) callback(ctx context.Context, u dbq.User, cq *telegram.CallbackQue
 		b.capture.Event(ctx, u.ID, "notify_toggled", map[string]any{"on": on})
 		edit(b.settingsText(nu), b.settingsKeyboard(nu))
 	}
+}
+
+// premium shows what Premium gives and Stars payment buttons.
+func (b *Bot) premium(ctx context.Context, u dbq.User, chatID int64) {
+	lang := u.Language
+	text := i18n.T(lang, "premium.about")
+	if billing.Active(u, b.now()) {
+		text += "\n\n" + i18n.T(lang, "premium.active", u.PremiumUntil.In(b.loc(u)).Format("02.01.2006"))
+	}
+	pr := b.billing.Prices()
+	var rows [][]telegram.InlineKeyboardButton
+	for _, p := range []struct {
+		plan, key string
+		stars     int
+	}{{billing.Monthly, "premium.monthly_btn", pr.MonthlyStars}, {billing.Yearly, "premium.yearly_btn", pr.YearlyStars}} {
+		link, err := b.billing.InvoiceLink(ctx, u.ID, p.plan, "Premium", stripTags(i18n.T(lang, "premium.about")))
+		if err != nil {
+			slog.Error("bot: invoice link", "err", err)
+			continue
+		}
+		rows = append(rows, []telegram.InlineKeyboardButton{{Text: i18n.T(lang, p.key, p.stars), URL: link}})
+	}
+	var kb *telegram.InlineKeyboardMarkup
+	if len(rows) > 0 {
+		kb = &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
+	}
+	b.send(ctx, chatID, text, kb, 0)
+}
+
+// stripTags removes the HTML bold tags used in messages (invoice descriptions are plain text).
+func stripTags(s string) string { return strings.NewReplacer("<b>", "", "</b>", "").Replace(s) }
+
+func (b *Bot) paid(ctx context.Context, u dbq.User, m *telegram.Message) {
+	until, fresh, err := b.billing.Paid(ctx, m.From.ID, *m.SuccessfulPayment)
+	if err != nil {
+		slog.Error("bot: payment", "err", err)
+		b.fail(ctx, m.Chat.ID, u, err)
+		return
+	}
+	if !fresh {
+		return
+	}
+	b.capture.Event(ctx, u.ID, "premium_paid", map[string]any{"stars": m.SuccessfulPayment.TotalAmount, "recurring": m.SuccessfulPayment.IsRecurring})
+	b.send(ctx, m.Chat.ID, i18n.T(u.Language, "premium.thanks", until.In(b.loc(u)).Format("02.01.2006")), nil, 0)
 }

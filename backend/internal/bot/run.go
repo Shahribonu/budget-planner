@@ -223,6 +223,12 @@ func (b *Bot) sendSummary(ctx context.Context, u dbq.User) {
 	if due := b.dueLines(ctx, u, day); len(due) > 0 {
 		text += "\n\n" + i18n.T(lang, "due.title") + "\n" + strings.Join(due, "\n")
 	}
+	if until, started, err := b.billing.MaybeStartTrial(ctx, u); err != nil {
+		slog.Warn("scheduler: trial", "err", err)
+	} else if started {
+		text += "\n\n" + i18n.T(lang, "premium.trial", until.In(b.loc(u)).Format("02.01.2006"))
+		b.capture.Event(ctx, u.ID, "trial_started", nil)
+	}
 	kb := &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{{Text: i18n.T(lang, "summary.off"), CallbackData: "n:off"}}}}
 	_, err = b.tg.SendMessage(ctx, telegram.SendMessage{ChatID: u.TelegramID, Text: text, ParseMode: "HTML", ReplyMarkup: kb})
 	if telegram.IsBlocked(err) {

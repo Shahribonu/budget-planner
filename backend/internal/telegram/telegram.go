@@ -13,9 +13,28 @@ import (
 )
 
 type Update struct {
-	UpdateID      int64          `json:"update_id"`
-	Message       *Message       `json:"message,omitempty"`
-	CallbackQuery *CallbackQuery `json:"callback_query,omitempty"`
+	UpdateID         int64             `json:"update_id"`
+	Message          *Message          `json:"message,omitempty"`
+	CallbackQuery    *CallbackQuery    `json:"callback_query,omitempty"`
+	PreCheckoutQuery *PreCheckoutQuery `json:"pre_checkout_query,omitempty"`
+}
+
+// PreCheckoutQuery must be answered within 10 seconds or the payment fails.
+type PreCheckoutQuery struct {
+	ID             string `json:"id"`
+	From           User   `json:"from"`
+	Currency       string `json:"currency"`
+	TotalAmount    int    `json:"total_amount"`
+	InvoicePayload string `json:"invoice_payload"`
+}
+
+type SuccessfulPayment struct {
+	Currency                   string `json:"currency"`
+	TotalAmount                int    `json:"total_amount"`
+	InvoicePayload             string `json:"invoice_payload"`
+	SubscriptionExpirationDate int64  `json:"subscription_expiration_date,omitempty"`
+	IsRecurring                bool   `json:"is_recurring,omitempty"`
+	TelegramPaymentChargeID    string `json:"telegram_payment_charge_id"`
 }
 
 type User struct {
@@ -38,6 +57,8 @@ type Message struct {
 	Date      int64  `json:"date"`
 	Text      string `json:"text,omitempty"`
 	Voice     *Voice `json:"voice,omitempty"`
+
+	SuccessfulPayment *SuccessfulPayment `json:"successful_payment,omitempty"`
 }
 
 type Voice struct {
@@ -62,6 +83,7 @@ type InlineKeyboardButton struct {
 	Text         string      `json:"text"`
 	CallbackData string      `json:"callback_data,omitempty"`
 	WebApp       *WebAppInfo `json:"web_app,omitempty"`
+	URL          string      `json:"url,omitempty"`
 }
 
 type WebAppInfo struct {
@@ -170,15 +192,47 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, id, text string) error
 func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSec int) ([]Update, error) {
 	var out []Update
 	err := c.call(ctx, "getUpdates", map[string]any{
-		"offset": offset, "timeout": timeoutSec, "allowed_updates": []string{"message", "callback_query"},
+		"offset": offset, "timeout": timeoutSec, "allowed_updates": allowedUpdates,
 	}, &out)
 	return out, err
 }
 
 func (c *Client) SetWebhook(ctx context.Context, url, secret string) error {
 	return c.call(ctx, "setWebhook", map[string]any{
-		"url": url, "secret_token": secret, "allowed_updates": []string{"message", "callback_query"},
+		"url": url, "secret_token": secret, "allowed_updates": allowedUpdates,
 	}, nil)
+}
+
+var allowedUpdates = []string{"message", "callback_query", "pre_checkout_query"}
+
+type LabeledPrice struct {
+	Label  string `json:"label"`
+	Amount int    `json:"amount"`
+}
+
+// Invoice describes a Telegram Stars (XTR) payment. SubscriptionPeriod 2592000 (30 days)
+// makes it a monthly subscription.
+type Invoice struct {
+	Title              string         `json:"title"`
+	Description        string         `json:"description"`
+	Payload            string         `json:"payload"`
+	Currency           string         `json:"currency"`
+	Prices             []LabeledPrice `json:"prices"`
+	SubscriptionPeriod int            `json:"subscription_period,omitempty"`
+}
+
+func (c *Client) CreateInvoiceLink(ctx context.Context, inv Invoice) (string, error) {
+	var link string
+	err := c.call(ctx, "createInvoiceLink", inv, &link)
+	return link, err
+}
+
+func (c *Client) AnswerPreCheckoutQuery(ctx context.Context, id string, ok bool, errMsg string) error {
+	in := map[string]any{"pre_checkout_query_id": id, "ok": ok}
+	if !ok {
+		in["error_message"] = errMsg
+	}
+	return c.call(ctx, "answerPreCheckoutQuery", in, nil)
 }
 
 func (c *Client) DeleteWebhook(ctx context.Context) error {

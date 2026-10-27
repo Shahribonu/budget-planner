@@ -165,6 +165,17 @@ type MonthlyPlan struct {
 	CreatedAt      time.Time
 }
 
+type Payment struct {
+	ID               int64
+	UserID           int64
+	TelegramChargeID string
+	Payload          string
+	Stars            int32
+	Recurring        bool
+	PremiumUntil     time.Time
+	CreatedAt        time.Time
+}
+
 type PlanItem struct {
 	ID             int64
 	PlanID         int64
@@ -235,4 +246,6 @@ type User struct {
 	ChatMode          *string
 	ChatModeUntil     *time.Time
 	PlanPromptedMonth *time.Time
+	PremiumUntil      *time.Time
+	TrialStartedAt    *time.Time
 }

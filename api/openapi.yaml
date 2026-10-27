@@ -332,7 +332,7 @@ paths:
                 amount_minor: { type: integer, format: int64, minimum: 1 }
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Budget" } } } }
-        "422": { description: "Validation failed; code budget_exists for a duplicate", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "Validation failed; code budget_exists for a duplicate, premium_required for a second budget on the free plan", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /budgets/{id}:
     parameters: [{ $ref: "#/components/parameters/Id" }]
@@ -487,6 +487,21 @@ paths:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /billing/invoice:
+    post:
+      summary: "A Telegram Stars payment link for Premium. Open it with Telegram.WebApp.openInvoice(url); when the status is 'paid', reload /me. monthly is a 30-day Stars subscription; yearly is a one-time payment for 365 days."
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [plan], properties: { plan: { type: string, enum: [monthly, yearly] } } } } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { url: { type: string }, stars: { type: integer } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "503": { description: Payments not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
 components:
   securitySchemes:
     tma:
@@ -545,7 +560,7 @@ components:
 
     User:
       type: object
-      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time]
+      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, premium, premium_until, trial_used]
       properties:
         id: { type: integer, format: int64 }
         telegram_id: { type: integer, format: int64 }
@@ -557,6 +572,9 @@ components:
         onboarded: { type: boolean, description: True once the user has at least one account }
         notify_enabled: { type: boolean, description: Evening summary in the bot }
         notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: "HH:MM, local time of the evening summary" }
+        premium: { type: boolean, description: Premium is active now (paid or trial) }
+        premium_until: { type: [string, "null"], format: date-time }
+        trial_used: { type: boolean, description: "The one-time 7-day trial (granted after 7 logged days) was already given" }
 
     Account:
       type: object
