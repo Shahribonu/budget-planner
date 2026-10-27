@@ -99,6 +99,7 @@ func (b *Bot) tick(ctx context.Context) {
 		slog.Warn("scheduler: expire drafts", "err", err)
 	}
 	b.budgetAlerts(ctx)
+	b.planPrompts(ctx)
 	users, err := b.q.UsersDueForSummary(ctx)
 	if err != nil {
 		slog.Warn("scheduler: due users", "err", err)

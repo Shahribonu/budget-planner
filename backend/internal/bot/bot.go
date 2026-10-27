@@ -22,6 +22,7 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/i18n"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
+	"github.com/Shahribonu/budget-planner/backend/internal/planning"
 	"github.com/Shahribonu/budget-planner/backend/internal/telegram"
 )
 
@@ -40,12 +41,13 @@ type Bot struct {
 	tg      *telegram.Client
 	q       *dbq.Queries
 	capture *capture.Service
+	plan    *planning.Service
 	stt     stt.Transcriber
 	now     func() time.Time
 }
 
-func New(cfg Config, tg *telegram.Client, pool *pgxpool.Pool, c *capture.Service, t stt.Transcriber) *Bot {
-	return &Bot{cfg: cfg, tg: tg, q: dbq.New(pool), capture: c, stt: t, now: time.Now}
+func New(cfg Config, tg *telegram.Client, pool *pgxpool.Pool, c *capture.Service, p *planning.Service, t stt.Transcriber) *Bot {
+	return &Bot{cfg: cfg, tg: tg, q: dbq.New(pool), capture: c, plan: p, stt: t, now: time.Now}
 }
 
 // HandleUpdate processes one update. It is safe to call more than once for the same
@@ -179,6 +181,8 @@ func (b *Bot) command(ctx context.Context, u dbq.User, m *telegram.Message) {
 		} else {
 			b.send(ctx, m.Chat.ID, i18n.T(lang, "app.unavailable"), nil, 0)
 		}
+	case "/plan":
+		b.startPlan(ctx, u, m.Chat.ID)
 	case "/lang":
 		b.send(ctx, m.Chat.ID, i18n.T(lang, "lang.choose"), languageKeyboard(), 0)
 	case "/settings":
@@ -245,6 +249,9 @@ func (b *Bot) settingsKeyboard(u dbq.User) *telegram.InlineKeyboardMarkup {
 // ---- logging ----
 
 func (b *Bot) text(ctx context.Context, u dbq.User, m *telegram.Message, text, source, transcript string) {
+	if b.planText(ctx, u, m, text) {
+		return
+	}
 	if n, ok := bank.Parse(text); ok && source == "chat" {
 		o, err := b.capture.CaptureBank(ctx, u, n)
 		if err != nil {
@@ -253,6 +260,9 @@ func (b *Bot) text(ctx context.Context, u dbq.User, m *telegram.Message, text, s
 		}
 		msg, kb := b.render(ctx, u, o)
 		b.send(ctx, m.Chat.ID, msg, kb, m.MessageID)
+		if o.Kind == capture.Saved {
+			b.offerMatch(ctx, u, m.Chat.ID, o.Tx)
+		}
 		return
 	}
 	ref := fmt.Sprintf("tg:%d:%d", m.Chat.ID, m.MessageID)
@@ -275,6 +285,9 @@ func (b *Bot) text(ctx context.Context, u dbq.User, m *telegram.Message, text, s
 			text += "\n" + i18n.T(u.Language, "card.heard", html.EscapeString(transcript))
 		}
 		b.send(ctx, m.Chat.ID, text, kb, m.MessageID)
+		if o.Kind == capture.Saved {
+			b.offerMatch(ctx, u, m.Chat.ID, o.Tx)
+		}
 		if o.FirstLog && u.NotifyEnabled {
 			b.send(ctx, m.Chat.ID, i18n.T(u.Language, "first_log.notify", notifyClock(u)), nil, 0)
 		}
@@ -413,6 +426,18 @@ func (b *Bot) callback(ctx context.Context, u dbq.User, cq *telegram.CallbackQue
 			return
 		}
 		toast = i18n.T(u.Language, "reconciled", i18n.Money(u.Language, bal, cur))
+	case "pl": // start the monthly plan
+		b.startPlan(ctx, u, chatID)
+	case "pm": // a purchase was the planned item
+		title, err := b.plan.MarkBought(ctx, u.ID, arg(1), arg(2))
+		if err != nil {
+			toast = i18n.T(u.Language, "error")
+			return
+		}
+		b.capture.Event(ctx, u.ID, "plan_matched", nil)
+		edit(i18n.T(u.Language, "match.done", html.EscapeString(title)), nil)
+	case "pn":
+		edit(cq.Message.Text, nil)
 	case "dx":
 		question := ""
 		if len(parts) > 2 {

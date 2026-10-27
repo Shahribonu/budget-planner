@@ -20,6 +20,7 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
 	"github.com/Shahribonu/budget-planner/backend/internal/db"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
+	"github.com/Shahribonu/budget-planner/backend/internal/planning"
 	"github.com/Shahribonu/budget-planner/backend/internal/telegram"
 )
 
@@ -71,7 +72,7 @@ func run() error {
 
 	if botToken != "" {
 		tg := telegram.New(botToken)
-		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capture.New(pool, l, ai), transcriber)
+		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capture.New(pool, l, ai), planning.NewService(pool, l), transcriber)
 		mode := getenv("BOT_MODE", map[bool]string{true: "polling", false: "webhook"}[env == "development"])
 		switch mode {
 		case "polling":

@@ -669,11 +669,14 @@ func (s *Service) MatchPurchase(ctx context.Context, userID int64, tx ledger.Tra
 	return best, nil
 }
 
-// MarkBought links a planned item to the transaction that bought it.
-func (s *Service) MarkBought(ctx context.Context, userID, itemID, txID int64) error {
+// MarkBought links a planned item to the transaction that bought it and returns its title.
+func (s *Service) MarkBought(ctx context.Context, userID, itemID, txID int64) (string, error) {
 	bought := "bought"
-	_, err := s.UpdateItem(ctx, userID, itemID, ItemPatch{Status: &bought, SetTx: true, TransactionID: &txID})
-	return err
+	if _, err := s.UpdateItem(ctx, userID, itemID, ItemPatch{Status: &bought, SetTx: true, TransactionID: &txID}); err != nil {
+		return "", err
+	}
+	it, err := s.q.GetPlanItem(ctx, dbq.GetPlanItemParams{ID: itemID, UserID: userID})
+	return it.Title, err
 }
 
 // ---- recurring income and bills ----

@@ -16,6 +16,7 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
+	"github.com/Shahribonu/budget-planner/backend/internal/planning"
 	"github.com/Shahribonu/budget-planner/backend/internal/telegram"
 	"github.com/Shahribonu/budget-planner/backend/internal/testdb"
 )
@@ -78,7 +79,7 @@ func setup(t *testing.T, transcriber stt.Transcriber) *harness {
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 	l := ledger.New(pool)
-	b := bot.New(bot.Config{MiniAppURL: "https://app.example"}, telegram.New("TOKEN").WithBaseURL(srv.URL), pool, capture.New(pool, l, nil), transcriber)
+	b := bot.New(bot.Config{MiniAppURL: "https://app.example"}, telegram.New("TOKEN").WithBaseURL(srv.URL), pool, capture.New(pool, l, nil), planning.NewService(pool, l), transcriber)
 	return &harness{t: t, b: b, tg: fake, userID: rand.Int64N(1 << 50), update: rand.Int64N(1 << 40)}
 }
 
@@ -282,9 +283,9 @@ func TestEveningSummary(t *testing.T) {
 		}
 		h.b.Tick(ctx)
 		msgs := sent(h.tg.take(), "sendMessage")
-		var mine []call
+		var mine []call // summaries only: from the 25th a plan nudge may arrive too
 		for _, m := range msgs {
-			if int64(m.body["chat_id"].(float64)) == h.userID {
+			if int64(m.body["chat_id"].(float64)) == h.userID && strings.Contains(m.body["text"].(string), "xulosa") {
 				mine = append(mine, m)
 			}
 		}
@@ -298,7 +299,7 @@ func TestEveningSummary(t *testing.T) {
 		// Never twice a day.
 		h.b.Tick(ctx)
 		for _, m := range sent(h.tg.take(), "sendMessage") {
-			if int64(m.body["chat_id"].(float64)) == h.userID {
+			if int64(m.body["chat_id"].(float64)) == h.userID && strings.Contains(m.body["text"].(string), "xulosa") {
 				t.Error("summary sent twice")
 			}
 		}
@@ -428,6 +429,66 @@ func TestForwardedBankMessage(t *testing.T) {
 	}
 	if strings.Contains(card, "🏦") {
 		t.Errorf("new account should match the bank: %q", card)
+	}
+}
+
+func TestPlanFlowAndPurchaseMatch(t *testing.T) {
+	pool := testdb.Pool(t)
+	h := setup(t, stt.None{})
+	h.b.HandleUpdate(ctx, h.message("/plan"))
+	if msgs := sent(h.tg.take(), "sendMessage"); len(msgs) != 1 || !strings.Contains(msgs[0].body["text"].(string), "rejalashtiryapsiz") {
+		t.Fatalf("/plan = %+v", msgs)
+	}
+	h.b.HandleUpdate(ctx, h.message("qishki kurtka 800 ming, AirPods 2.5 mln agar bo'lsa"))
+	msgs := sent(h.tg.take(), "sendMessage")
+	if len(msgs) != 1 {
+		t.Fatalf("plan reply = %+v", msgs)
+	}
+	summary := msgs[0].body["text"].(string)
+	for _, want := range []string{"rejasi", "qishki kurtka", "AirPods", "Daromad hali noma'lum"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("summary lacks %q:\n%s", want, summary)
+		}
+	}
+	// Plan mode is over: the next message is an expense again.
+	h.b.HandleUpdate(ctx, h.message("taksi 25 ming"))
+	if msgs := sent(h.tg.take(), "sendMessage"); len(msgs) == 0 || !strings.Contains(msgs[0].body["text"].(string), "Taksi") {
+		t.Fatalf("after plan = %+v", msgs)
+	}
+
+	// A planned item in the current month, then a purchase that matches it.
+	var userID, clothing int64
+	_ = pool.QueryRow(ctx, `select id from users where telegram_id = $1`, h.userID).Scan(&userID)
+	_ = pool.QueryRow(ctx, `select id from categories where key = 'clothing'`).Scan(&clothing)
+	loc, _ := time.LoadLocation("Asia/Tashkent")
+	now := time.Now().In(loc)
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	ps := planning.NewService(pool, ledger.New(pool))
+	if _, err := ps.AddItems(ctx, userID, month, "UZS", []planning.NewItem{{Title: "Krossovka", CategoryID: &clothing, AmountMin: 600_000_00, AmountMax: 700_000_00, Priority: "should"}}); err != nil {
+		t.Fatal(err)
+	}
+	h.b.HandleUpdate(ctx, h.message("krossovka 650 ming"))
+	msgs = sent(h.tg.take(), "sendMessage")
+	var yes string
+	for _, m := range msgs {
+		for _, d := range buttonData(m) {
+			if strings.HasPrefix(d, "pm:") {
+				yes = d
+			}
+		}
+	}
+	if yes == "" {
+		t.Fatalf("no match question: %+v", msgs)
+	}
+	h.b.HandleUpdate(ctx, h.callback(yes))
+	if edits := sent(h.tg.take(), "editMessageText"); len(edits) != 1 || !strings.Contains(edits[0].body["text"].(string), "Krossovka") {
+		t.Errorf("match answer = %+v", edits)
+	}
+	v, _ := ps.Get(ctx, userID, month, "UZS")
+	for _, it := range v.Items {
+		if it.Title == "Krossovka" && (it.Status != "bought" || it.TransactionID == nil) {
+			t.Errorf("item = %+v", it)
+		}
 	}
 }
 

@@ -151,8 +151,8 @@ func TestCarryOverAndMatch(t *testing.T) {
 	if err != nil || match == nil || match.Title != "Kitob" {
 		t.Fatalf("match = %+v, %v", match, err)
 	}
-	if err := f.svc.MarkBought(ctx, f.user, match.ID, tx.ID); err != nil {
-		t.Fatal(err)
+	if title, err := f.svc.MarkBought(ctx, f.user, match.ID, tx.ID); err != nil || title != "Kitob" {
+		t.Fatalf("mark bought = %q, %v", title, err)
 	}
 	// A far cheaper purchase in the category is not the jacket.
 	small, _, _ := f.led.Record(ctx, f.user, ledger.Input{Type: ledger.Expense, OccurredOn: time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC),

@@ -352,6 +352,141 @@ paths:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /plan:
+    parameters:
+      - { name: month, in: query, description: "YYYY-MM; default: current month, or next month from the 20th", schema: { type: string } }
+      - { name: currency, in: query, description: Default the user's main currency, schema: { $ref: "#/components/schemas/Currency" } }
+    get:
+      summary: The month's spending plan with inputs and recommendations. Created on first use, carrying over unbought items from the month before.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlanView" } } } }
+    patch:
+      summary: Adjust inputs. For income_override, income_day and buffer_override, absent keeps, null clears, a value sets.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                income_override: { type: [integer, "null"], format: int64, minimum: 0 }
+                income_day: { type: [integer, "null"], minimum: 1, maximum: 31 }
+                savings_minor: { type: integer, format: int64, minimum: 0 }
+                buffer_override: { type: [integer, "null"], format: int64, minimum: 0 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlanView" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /plan/items:
+    parameters:
+      - { name: month, in: query, schema: { type: string } }
+      - { name: currency, in: query, schema: { $ref: "#/components/schemas/Currency" } }
+    post:
+      summary: Add 1–50 items
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/NewPlanItem" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/PlanView" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /plan/parse:
+    parameters:
+      - { name: currency, in: query, schema: { $ref: "#/components/schemas/Currency" } }
+    post:
+      summary: "Preview items from free text (\"ijara 3 mln, kurtka 700-900 ming, AirPods 2.5 mln agar bo'lsa\") with suggested category and priority. Nothing is saved; send the items to POST /plan/items."
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string } } } } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/NewPlanItem" } } } }
+
+  /plan/items/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    patch:
+      summary: Edit, change status (bought links transaction_id), or re-prioritize. category_id, due_on and transaction_id accept null to clear.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                category_id: { type: [integer, "null"], format: int64 }
+                amount_min_minor: { type: integer, format: int64 }
+                amount_max_minor: { type: integer, format: int64 }
+                priority: { type: string, enum: [must, should, nice] }
+                due_on: { type: [string, "null"], format: date }
+                status: { type: string, enum: [planned, bought, postponed, dropped] }
+                transaction_id: { type: [integer, "null"], format: int64 }
+                note: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlanView" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      summary: Delete
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /recurring:
+    get:
+      summary: Recurring income and bills. Not posted automatically; they feed the plan.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { recurring: { type: array, items: { $ref: "#/components/schemas/Recurring" } } } }
+    post:
+      summary: Add
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, title, currency, amount_minor, day_of_month]
+              properties:
+                kind: { type: string, enum: [income, expense] }
+                title: { type: string, maxLength: 64 }
+                category_id: { type: [integer, "null"], format: int64, description: Category of the same kind }
+                currency: { $ref: "#/components/schemas/Currency" }
+                amount_minor: { type: integer, format: int64, minimum: 1 }
+                day_of_month: { type: integer, minimum: 1, maximum: 31, description: "Clamped to the month's last day" }
+                account_id: { type: [integer, "null"], format: int64 }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Recurring" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /recurring/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    patch:
+      summary: Edit
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                amount_minor: { type: integer, format: int64, minimum: 1 }
+                day_of_month: { type: integer, minimum: 1, maximum: 31 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Recurring" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     tma:
@@ -524,6 +659,103 @@ components:
         amount_minor: { type: integer, format: int64 }
         spent_minor: { type: integer, format: int64, description: "Expenses incl. installment purchases; transfers, debts and installment payments excluded" }
         remaining_minor: { type: integer, format: int64, description: Negative when over budget }
+
+    NewPlanItem:
+      type: object
+      required: [title, amount_min_minor, priority]
+      properties:
+        title: { type: string, maxLength: 64 }
+        category_id: { type: [integer, "null"], format: int64, description: Expense category }
+        amount_min_minor: { type: integer, format: int64, minimum: 1 }
+        amount_max_minor: { type: integer, format: int64, description: "0 or omitted: same as min. The plan uses the max: conservative." }
+        priority: { type: string, enum: [must, should, nice] }
+        due_on: { type: [string, "null"], format: date }
+        note: { type: string, maxLength: 200 }
+
+    PlanDecision:
+      type: object
+      required: [group, reason, suggest_month, monthly_saving_minor, months, from_savings_minor]
+      properties:
+        group: { type: string, enum: [fits, later, reconsider] }
+        reason:
+          type: string
+          enum: [must, fixed_date, fits, before_salary, not_enough, too_large, postponed, must_shortfall]
+          description: |
+            must: a Must item, placed first. fixed_date: has a date this month and fits. fits: fits in what is left.
+            before_salary: due before income_day and cash until then is short. not_enough: not enough left this month.
+            too_large / postponed: a Nice item large compared with free money (postponed: carried over 2+ times).
+            must_shortfall: a Must item placed although money is short; the plan's left_minor goes negative.
+        suggest_month: { type: [string, "null"], example: 2026-12, description: When it becomes affordable }
+        monthly_saving_minor: { type: integer, format: int64, description: Suggested monthly saving for large items; 0 otherwise }
+        months: { type: integer, description: Months of that saving }
+        from_savings_minor: { type: integer, format: int64, description: "Should items: lowering savings once by this much makes it fit now; 0 otherwise" }
+
+    PlanItem:
+      type: object
+      required: [id, title, category_id, amount_min_minor, amount_max_minor, priority, due_on, status, postponed_count, transaction_id, note, decision]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        category_id: { type: [integer, "null"], format: int64 }
+        amount_min_minor: { type: integer, format: int64 }
+        amount_max_minor: { type: integer, format: int64 }
+        priority: { type: string, enum: [must, should, nice] }
+        due_on: { type: [string, "null"], format: date }
+        status: { type: string, enum: [planned, bought, postponed, dropped] }
+        postponed_count: { type: integer, description: Times carried over from earlier months }
+        transaction_id: { type: [integer, "null"], format: int64, description: The purchase, once bought }
+        note: { type: string }
+        decision: { oneOf: [{ $ref: "#/components/schemas/PlanDecision" }, { type: "null" }], description: Only for planned items }
+
+    PlanView:
+      type: object
+      required: [month, currency, inputs, result, items]
+      properties:
+        month: { type: string, example: 2026-11 }
+        currency: { $ref: "#/components/schemas/Currency" }
+        inputs:
+          type: object
+          description: "Free money = income − reserved − savings − buffer. Every figure is shown with its source so the plan is explainable."
+          properties:
+            income_minor: { type: integer, format: int64 }
+            income_source: { type: string, enum: [override, recurring, history, none], description: "history: the lowest of the last 3 months with income (conservative)" }
+            income_override: { type: boolean }
+            income_day: { type: integer, description: Day the main income arrives }
+            reserved_minor: { type: integer, format: int64, description: Sum of lines }
+            lines:
+              type: array
+              items:
+                type: object
+                properties:
+                  kind: { type: string, enum: [recurring, installment, debt] }
+                  title: { type: string }
+                  amount_minor: { type: integer, format: int64 }
+                  due_on: { type: [string, "null"], format: date }
+            savings_minor: { type: integer, format: int64 }
+            buffer_minor: { type: integer, format: int64, description: "Everyday spending (groceries, cafes, transport, taxi, fuel) for the month" }
+            buffer_source: { type: string, enum: [override, history, none] }
+            buffer_override: { type: boolean }
+            cash_now_minor: { type: integer, format: int64 }
+        result:
+          type: object
+          properties:
+            free_minor: { type: integer, format: int64 }
+            allocated_minor: { type: integer, format: int64 }
+            left_minor: { type: integer, format: int64 }
+        items: { type: array, items: { $ref: "#/components/schemas/PlanItem" } }
+
+    Recurring:
+      type: object
+      required: [id, kind, title, category_id, currency, amount_minor, day_of_month, account_id]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { type: string, enum: [income, expense] }
+        title: { type: string }
+        category_id: { type: [integer, "null"], format: int64 }
+        currency: { $ref: "#/components/schemas/Currency" }
+        amount_minor: { type: integer, format: int64 }
+        day_of_month: { type: integer }
+        account_id: { type: [integer, "null"], format: int64 }
 
     Transaction:
       type: object
