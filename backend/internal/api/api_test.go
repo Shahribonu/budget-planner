@@ -159,6 +159,7 @@ func TestAPIRejects(t *testing.T) {
 	c.do("POST", "/api/transactions", map[string]any{"type": "expense", "occurred_on": "26.10.2026"}, 400)
 	c.do("PATCH", "/api/me", map[string]any{"timezone": "Mars/Base"}, 422)
 	c.do("PATCH", "/api/me", map[string]any{"notify_time": "25:00"}, 422)
+	c.do("GET", "/api/me/avatar", nil, 404) // no Telegram client configured
 	c.do("GET", "/api/summary?month=2026-13", nil, 422)
 }
 

@@ -252,6 +252,35 @@ func (c *Client) SetMyCommands(ctx context.Context, cmds []BotCommand, languageC
 	return c.call(ctx, "setMyCommands", in, nil)
 }
 
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int64  `json:"file_size,omitempty"`
+}
+
+// ProfilePhoto returns the file_id of the user's current profile photo in the smallest
+// size at least minSide pixels wide, or "" when there is none (or privacy hides it).
+func (c *Client) ProfilePhoto(ctx context.Context, userID int64, minSide int) (string, error) {
+	var out struct {
+		Photos [][]PhotoSize `json:"photos"`
+	}
+	if err := c.call(ctx, "getUserProfilePhotos", map[string]any{"user_id": userID, "limit": 1}, &out); err != nil {
+		return "", err
+	}
+	if len(out.Photos) == 0 || len(out.Photos[0]) == 0 {
+		return "", nil
+	}
+	sizes := out.Photos[0]
+	best := sizes[len(sizes)-1]
+	for _, s := range sizes {
+		if s.Width >= minSide && s.Width < best.Width {
+			best = s
+		}
+	}
+	return best.FileID, nil
+}
+
 // DownloadFile fetches a file by file_id, refusing anything larger than maxBytes.
 func (c *Client) DownloadFile(ctx context.Context, fileID string, maxBytes int64) ([]byte, error) {
 	var f struct {

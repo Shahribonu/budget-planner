@@ -74,6 +74,7 @@ func run() error {
 	cfg := api.Config{BotToken: botToken, DevAuth: env == "development"}
 	if botToken != "" {
 		cfg.Billing = billing.New(pool, telegram.New(botToken), prices)
+		cfg.Telegram = telegram.New(botToken)
 	}
 
 	if botToken != "" {

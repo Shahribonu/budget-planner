@@ -22,6 +22,7 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
 	"github.com/Shahribonu/budget-planner/backend/internal/planning"
+	"github.com/Shahribonu/budget-planner/backend/internal/telegram"
 )
 
 type Config struct {
@@ -33,6 +34,8 @@ type Config struct {
 	TelegramWebhook http.Handler
 	// Billing creates Stars invoices; nil disables POST /api/billing/invoice.
 	Billing *billing.Service
+	// Telegram fetches profile photos for GET /api/me/avatar; nil means no photos.
+	Telegram *telegram.Client
 }
 
 type Server struct {
@@ -59,6 +62,7 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 		r.Use(limitBody, s.authenticate)
 		r.Get("/me", s.getMe)
 		r.Patch("/me", s.patchMe)
+		r.Get("/me/avatar", s.avatar)
 		r.Get("/accounts", s.listAccounts)
 		r.Post("/accounts", s.createAccount)
 		r.Patch("/accounts/{id}", s.patchAccount)

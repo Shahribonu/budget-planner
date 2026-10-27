@@ -36,6 +36,13 @@ paths:
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
 
+  /me/avatar:
+    get:
+      summary: "The user's Telegram profile photo (JPEG), proxied. Use it when initDataUnsafe.user.photo_url is missing; fetch with the auth header and show via an object URL. 404 when there is no photo or privacy hides it."
+      responses:
+        "200": { description: JPEG image, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /accounts:
     get:
       summary: User's money accounts with current balances

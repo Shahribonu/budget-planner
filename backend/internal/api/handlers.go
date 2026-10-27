@@ -504,3 +504,30 @@ func (s *Server) billingPlans(w http.ResponseWriter, r *http.Request) {
 	p := s.cfg.Billing.Prices()
 	writeJSON(w, http.StatusOK, map[string]any{"monthly_stars": p.MonthlyStars, "yearly_stars": p.YearlyStars, "free_budgets": ledger.FreeBudgets})
 }
+
+// avatar serves the user's Telegram profile photo. The Bot API file URL holds the bot
+// token, so the photo is proxied rather than linked. 404 when there is no photo.
+func (s *Server) avatar(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Telegram == nil {
+		writeError(w, http.StatusNotFound, "not_found", "", "no photo")
+		return
+	}
+	u, err := s.q.GetUser(r.Context(), userID(r))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	fileID, err := s.cfg.Telegram.ProfilePhoto(r.Context(), u.TelegramID, 160)
+	if err != nil || fileID == "" {
+		writeError(w, http.StatusNotFound, "not_found", "", "no photo")
+		return
+	}
+	img, err := s.cfg.Telegram.DownloadFile(r.Context(), fileID, 1<<20)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "", "no photo")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	_, _ = w.Write(img)
+}
