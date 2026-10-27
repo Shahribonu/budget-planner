@@ -162,6 +162,192 @@ paths:
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Summary" } } } }
 
+  /debts:
+    get:
+      summary: Debts (qarz), open and closed, newest first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { debts: { type: array, items: { $ref: "#/components/schemas/Debt" } } } }
+    post:
+      summary: Record money lent or borrowed. Neither income nor expense.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [direction, counterparty, currency, amount_minor, occurred_on]
+              properties:
+                direction: { type: string, enum: [lent, borrowed] }
+                counterparty: { type: string, maxLength: 64 }
+                currency: { $ref: "#/components/schemas/Currency" }
+                amount_minor: { type: integer, format: int64, minimum: 1 }
+                account_id: { type: [integer, "null"], format: int64, description: "Account the money left (lent) or arrived in (borrowed). Omit for a debt from before tracking: no balance changes." }
+                occurred_on: { type: string, format: date }
+                due_on: { type: [string, "null"], format: date }
+                note: { type: string, maxLength: 200 }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Debt" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /debts/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      summary: A debt with its transactions (the debt itself and every repayment)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  debt: { $ref: "#/components/schemas/Debt" }
+                  transactions: { type: array, items: { $ref: "#/components/schemas/Transaction" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Edit name, note or due date. due_on absent keeps it, null clears it.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                counterparty: { type: string, maxLength: 64 }
+                note: { type: string, maxLength: 200 }
+                due_on: { type: [string, "null"], format: date }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Debt" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete the debt and all its transactions
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /debts/{id}/payments:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    post:
+      summary: Repayment — money back to you (lent) or paid back by you (borrowed). Undo it by deleting the returned transaction.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PaymentInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "422": { description: "Validation failed; code overpayment when amount exceeds what is owed", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /installments:
+    get:
+      summary: Installment plans (nasiya), newest first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { installments: { type: array, items: { $ref: "#/components/schemas/Installment" } } } }
+    post:
+      summary: Buy on installment. The purchase is one expense on occurred_on; payments only reduce the debt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, category_id, currency, total_minor, months, first_due_on, occurred_on]
+              properties:
+                title: { type: string, maxLength: 64, example: iPhone 16 }
+                provider: { type: string, maxLength: 64, example: Uzum Nasiya }
+                category_id: { type: integer, format: int64, description: Expense category of the purchase }
+                currency: { $ref: "#/components/schemas/Currency" }
+                total_minor: { type: integer, format: int64 }
+                months: { type: integer, minimum: 1, maximum: 60 }
+                first_due_on: { type: string, format: date }
+                pay_from_account_id: { type: [integer, "null"], format: int64, description: Default account for payments }
+                occurred_on: { type: string, format: date, description: Purchase date }
+                record_purchase: { type: boolean, default: true, description: "false for a plan started before tracking: the debt is recorded but the past purchase is not counted as spending" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Installment" } } } }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /installments/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      summary: A plan with its schedule
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Installment" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete the plan and all its transactions
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /installments/{id}/payments:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    post:
+      summary: Pay. amount_minor 0 or omitted pays the rest of the next due payment.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PaymentInput" } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
+        "422": { description: "Validation failed; code overpayment when amount exceeds what is left", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /budgets:
+    get:
+      summary: Monthly budgets with spending in the month
+      parameters:
+        - { name: month, in: query, description: "YYYY-MM; default current month in user's time zone", schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [month, days_left, budgets]
+                properties:
+                  month: { type: string, example: 2026-10 }
+                  days_left: { type: integer, description: Days left in the month after today; 0 for a past month }
+                  budgets: { type: array, items: { $ref: "#/components/schemas/Budget" } }
+    post:
+      summary: Create a budget. One per category and currency; category_id null is the overall monthly limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency, amount_minor]
+              properties:
+                category_id: { type: [integer, "null"], format: int64, description: Expense category; null for overall }
+                currency: { $ref: "#/components/schemas/Currency" }
+                amount_minor: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Budget" } } } }
+        "422": { description: "Validation failed; code budget_exists for a duplicate", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /budgets/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    patch:
+      summary: Change the limit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [amount_minor], properties: { amount_minor: { type: integer, format: int64, minimum: 1 } } }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     tma:
@@ -199,11 +385,16 @@ components:
     AccountType: { type: string, enum: [cash, humo, uzcard, visa, mastercard, savings, other] }
     TransactionType:
       type: string
-      enum: [expense, income, transfer, exchange, opening]
+      enum: [expense, income, transfer, exchange, opening, debt, debt_payment, installment, installment_payment]
       description: |
         transfer: between own accounts in one currency (never income or expense).
         exchange: between own accounts in different currencies.
         opening: opening balance, created by the server only.
+        debt, debt_payment: money lent/borrowed and repayments (never income or expense). Created via /debts.
+        installment: a purchase on installment (an expense, once). installment_payment: a payment on the plan
+        (not an expense). Created via /installments.
+        Transactions of these four types are read-only through /transactions (PUT returns 422
+        managed_elsewhere); debt_payment and installment_payment can be deleted to undo them.
     Source: { type: string, enum: [manual, chat, voice, bank, receipt] }
 
     Money:
@@ -264,6 +455,69 @@ components:
         source: { $ref: "#/components/schemas/Source" }
         source_ref: { type: string, description: Idempotency key, e.g. Telegram update id; repeats return the existing transaction }
 
+    PaymentInput:
+      type: object
+      required: [account_id, occurred_on]
+      properties:
+        amount_minor: { type: integer, format: int64, minimum: 0 }
+        account_id: { type: integer, format: int64 }
+        occurred_on: { type: string, format: date }
+
+    Debt:
+      type: object
+      required: [id, direction, counterparty, currency, principal_minor, remaining_minor, due_on, note, closed, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        direction: { type: string, enum: [lent, borrowed], description: "lent: they owe you; borrowed: you owe them" }
+        counterparty: { type: string }
+        currency: { $ref: "#/components/schemas/Currency" }
+        principal_minor: { type: integer, format: int64 }
+        remaining_minor: { type: integer, format: int64, description: Still owed }
+        due_on: { type: [string, "null"], format: date }
+        note: { type: string }
+        closed: { type: boolean, description: remaining_minor is 0 }
+        created_at: { type: string, format: date-time }
+
+    ScheduleRow:
+      type: object
+      required: [n, due_on, amount_minor, paid]
+      properties:
+        n: { type: integer }
+        due_on: { type: string, format: date }
+        amount_minor: { type: integer, format: int64, description: "In next: what is left of this payment after partial payments" }
+        paid: { type: boolean }
+
+    Installment:
+      type: object
+      required: [id, title, provider, category_id, currency, total_minor, paid_minor, remaining_minor, months, pay_from_account_id, next, schedule, closed, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        provider: { type: string }
+        category_id: { type: integer, format: int64 }
+        currency: { $ref: "#/components/schemas/Currency" }
+        total_minor: { type: integer, format: int64 }
+        paid_minor: { type: integer, format: int64 }
+        remaining_minor: { type: integer, format: int64 }
+        months: { type: integer }
+        pay_from_account_id: { type: [integer, "null"], format: int64 }
+        next: { oneOf: [{ $ref: "#/components/schemas/ScheduleRow" }, { type: "null" }] }
+        schedule: { type: array, items: { $ref: "#/components/schemas/ScheduleRow" } }
+        closed: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Budget:
+      type: object
+      required: [id, category_id, currency, amount_minor, spent_minor, remaining_minor]
+      description: The bot alerts once at 80% and once at 100% per month.
+      properties:
+        id: { type: integer, format: int64 }
+        category_id: { type: [integer, "null"], format: int64, description: null is the overall monthly limit }
+        currency: { $ref: "#/components/schemas/Currency" }
+        amount_minor: { type: integer, format: int64 }
+        spent_minor: { type: integer, format: int64, description: "Expenses incl. installment purchases; transfers, debts and installment payments excluded" }
+        remaining_minor: { type: integer, format: int64, description: Negative when over budget }
+
     Transaction:
       type: object
       required: [id, type, occurred_on, amount_minor, currency, account_id, description, source, created_at]
@@ -273,7 +527,7 @@ components:
         occurred_on: { type: string, format: date }
         amount_minor: { type: integer, format: int64 }
         currency: { $ref: "#/components/schemas/Currency" }
-        account_id: { type: integer, format: int64 }
+        account_id: { type: [integer, "null"], format: int64, description: "null for a debt or installment that moved no money" }
         to_account_id: { type: [integer, "null"], format: int64 }
         to_amount_minor: { type: [integer, "null"], format: int64 }
         to_currency: { oneOf: [{ $ref: "#/components/schemas/Currency" }, { type: "null" }] }
@@ -281,10 +535,12 @@ components:
         description: { type: string }
         source: { $ref: "#/components/schemas/Source" }
         created_at: { type: string, format: date-time }
+        debt_id: { type: [integer, "null"], format: int64 }
+        installment_id: { type: [integer, "null"], format: int64 }
 
     Summary:
       type: object
-      required: [month, balances, income, expense, by_category, recent]
+      required: [month, balances, income, expense, by_category, recent, owed_to_me, i_owe]
       properties:
         month: { type: string, example: 2026-10 }
         balances: { type: array, description: Total of asset accounts per currency, items: { $ref: "#/components/schemas/Money" } }
@@ -301,3 +557,5 @@ components:
               amount_minor: { type: integer, format: int64 }
               currency: { $ref: "#/components/schemas/Currency" }
         recent: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/Transaction" } }
+        owed_to_me: { type: array, description: Open debts owed to the user, per currency, items: { $ref: "#/components/schemas/Money" } }
+        i_owe: { type: array, description: Open debts and installment plans the user owes, per currency, positive, items: { $ref: "#/components/schemas/Money" } }

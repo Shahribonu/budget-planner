@@ -238,7 +238,7 @@ type transactionJSON struct {
 	OccurredOn    date        `json:"occurred_on"`
 	AmountMinor   int64       `json:"amount_minor"`
 	Currency      string      `json:"currency"`
-	AccountID     int64       `json:"account_id"`
+	AccountID     *int64      `json:"account_id"` // null for a debt or plan that moved no money
 	ToAccountID   *int64      `json:"to_account_id"`
 	ToAmountMinor *int64      `json:"to_amount_minor"`
 	ToCurrency    *string     `json:"to_currency"`
@@ -246,12 +246,18 @@ type transactionJSON struct {
 	Description   string      `json:"description"`
 	Source        string      `json:"source"`
 	CreatedAt     time.Time   `json:"created_at"`
+	DebtID        *int64      `json:"debt_id"`
+	InstallmentID *int64      `json:"installment_id"`
 }
 
 func toTransactionJSON(t ledger.Transaction) transactionJSON {
+	var account *int64
+	if t.AccountID != 0 {
+		account = &t.AccountID
+	}
 	return transactionJSON{
-		t.ID, t.Type, date{t.OccurredOn}, t.AmountMinor, t.Currency, t.AccountID, t.ToAccountID,
-		t.ToAmountMinor, t.ToCurrency, t.CategoryID, t.Description, t.Source, t.CreatedAt,
+		t.ID, t.Type, date{t.OccurredOn}, t.AmountMinor, t.Currency, account, t.ToAccountID,
+		t.ToAmountMinor, t.ToCurrency, t.CategoryID, t.Description, t.Source, t.CreatedAt, t.DebtID, t.PlanID,
 	}
 }
 
@@ -433,5 +439,7 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		"expense":     toMoneyJSON(sum.Expense),
 		"by_category": cats,
 		"recent":      toTransactionsJSON(sum.Recent),
+		"owed_to_me":  toMoneyJSON(sum.OwedToMe),
+		"i_owe":       toMoneyJSON(sum.IOwe),
 	})
 }

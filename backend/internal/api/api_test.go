@@ -142,3 +142,79 @@ func TestAPIRejects(t *testing.T) {
 	c.do("PATCH", "/api/me", map[string]any{"notify_time": "25:00"}, 422)
 	c.do("GET", "/api/summary?month=2026-13", nil, 422)
 }
+
+func TestDebtsAndInstallmentsEndToEnd(t *testing.T) {
+	pool := testdb.Pool(t)
+	srv := httptest.NewServer(api.New(api.Config{BotToken: botToken}, pool))
+	defer srv.Close()
+	c := newClient(t, srv, rand.Int64N(1<<50))
+	today := time.Now().Format(time.DateOnly)
+
+	cash := num(c.do("POST", "/api/accounts", map[string]any{"name": "Naqd", "type": "cash", "currency": "UZS", "opening_balance_minor": 1_000_000_00}, 201)["id"])
+	d := c.do("POST", "/api/debts", map[string]any{
+		"direction": "lent", "counterparty": "Aziz", "currency": "UZS", "amount_minor": 200_000_00,
+		"account_id": cash, "occurred_on": today, "due_on": "2026-12-01", "note": "telefon uchun",
+	}, 201)
+	id := num(d["id"])
+	if num(d["remaining_minor"]) != 200_000_00 || d["due_on"] != "2026-12-01" || d["closed"] != false {
+		t.Errorf("created debt = %v", d)
+	}
+	c.do("POST", fmt.Sprintf("/api/debts/%d/payments", id), map[string]any{"amount_minor": 500_000_00, "account_id": cash, "occurred_on": today}, 422)
+	pay := c.do("POST", fmt.Sprintf("/api/debts/%d/payments", id), map[string]any{"amount_minor": 50_000_00, "account_id": cash, "occurred_on": today}, 201)
+	if pay["type"] != "debt_payment" || num(pay["debt_id"]) != id {
+		t.Errorf("payment = %v", pay)
+	}
+	// due_on: null clears it; omitting it keeps it.
+	if got := c.do("PATCH", fmt.Sprintf("/api/debts/%d", id), map[string]any{"note": "x"}, 200); got["due_on"] != "2026-12-01" {
+		t.Errorf("due kept = %v", got["due_on"])
+	}
+	if got := c.do("PATCH", fmt.Sprintf("/api/debts/%d", id), map[string]any{"due_on": nil}, 200); got["due_on"] != nil {
+		t.Errorf("due cleared = %v", got["due_on"])
+	}
+	detail := c.do("GET", fmt.Sprintf("/api/debts/%d", id), nil, 200)
+	if num(detail["debt"].(map[string]any)["remaining_minor"]) != 150_000_00 || len(detail["transactions"].([]any)) != 2 {
+		t.Errorf("detail = %v", detail)
+	}
+
+	// An old debt touches no account: account_id is null.
+	old := num(c.do("POST", "/api/debts", map[string]any{"direction": "borrowed", "counterparty": "Akam", "currency": "UZS", "amount_minor": 1_000_00, "occurred_on": today}, 201)["id"])
+	oldTx := c.do("GET", fmt.Sprintf("/api/debts/%d", old), nil, 200)["transactions"].([]any)[0].(map[string]any)
+	if oldTx["account_id"] != nil || oldTx["type"] != "debt" {
+		t.Errorf("old debt tx = %v", oldTx)
+	}
+
+	var home int64
+	for _, cat := range c.do("GET", "/api/categories", nil, 200)["categories"].([]any) {
+		if m := cat.(map[string]any); m["key"] == "home" {
+			home = num(m["id"])
+		}
+	}
+	plan := c.do("POST", "/api/installments", map[string]any{
+		"title": "Muzlatkich", "provider": "Uzum Nasiya", "category_id": home, "currency": "UZS",
+		"total_minor": 3_000_000_00, "months": 3, "first_due_on": today, "pay_from_account_id": cash, "occurred_on": today,
+	}, 201)
+	pid := num(plan["id"])
+	if len(plan["schedule"].([]any)) != 3 || num(plan["next"].(map[string]any)["amount_minor"]) != 1_000_000_00 {
+		t.Errorf("plan = %v", plan)
+	}
+	c.do("POST", fmt.Sprintf("/api/installments/%d/payments", pid), map[string]any{"account_id": cash, "occurred_on": today}, 201)
+	if p := c.do("GET", fmt.Sprintf("/api/installments/%d", pid), nil, 200); num(p["remaining_minor"]) != 2_000_000_00 {
+		t.Errorf("after payment = %v", p)
+	}
+
+	sum := c.do("GET", "/api/summary", nil, 200)
+	owed := sum["owed_to_me"].([]any)[0].(map[string]any)
+	owe := sum["i_owe"].([]any)[0].(map[string]any)
+	if num(owed["amount_minor"]) != 150_000_00 || num(owe["amount_minor"]) != 2_001_000_00 {
+		t.Errorf("summary owed %v, owe %v", owed, owe)
+	}
+
+	other := newClient(t, srv, rand.Int64N(1<<50))
+	other.do("GET", fmt.Sprintf("/api/debts/%d", id), nil, 404)
+	other.do("GET", fmt.Sprintf("/api/installments/%d", pid), nil, 404)
+	c.do("DELETE", fmt.Sprintf("/api/installments/%d", pid), nil, 204)
+	c.do("DELETE", fmt.Sprintf("/api/debts/%d", id), nil, 204)
+	if n := len(c.do("GET", "/api/debts", nil, 200)["debts"].([]any)); n != 1 {
+		t.Errorf("debts after delete = %d", n)
+	}
+}

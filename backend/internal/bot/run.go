@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"html"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -97,6 +98,7 @@ func (b *Bot) tick(ctx context.Context) {
 	if _, err := b.q.ExpireDrafts(ctx); err != nil {
 		slog.Warn("scheduler: expire drafts", "err", err)
 	}
+	b.budgetAlerts(ctx)
 	users, err := b.q.UsersDueForSummary(ctx)
 	if err != nil {
 		slog.Warn("scheduler: due users", "err", err)
@@ -105,6 +107,100 @@ func (b *Bot) tick(ctx context.Context) {
 	for _, u := range users {
 		b.sendSummary(ctx, u)
 	}
+}
+
+// budgetAlerts warns once per budget and month at 80% and again at 100%. Checking every
+// minute catches spending from the app and the chat alike.
+func (b *Bot) budgetAlerts(ctx context.Context) {
+	rows, err := b.q.BudgetsForAlerts(ctx)
+	if err != nil {
+		slog.Warn("scheduler: budgets", "err", err)
+		return
+	}
+	for _, r := range rows {
+		threshold := 0
+		switch {
+		case r.Spent >= r.Amount:
+			threshold = 100
+		case r.Spent*100 >= r.Amount*80:
+			threshold = 80
+		default:
+			continue
+		}
+		if _, err := b.q.ClaimBudgetAlert(ctx, dbq.ClaimBudgetAlertParams{BudgetID: r.ID, Month: r.Month, Threshold: int32(threshold)}); err != nil {
+			continue // already sent (pgx.ErrNoRows) or a database error; never send twice
+		}
+		if threshold == 100 { // no 80% warning after the budget is already used up
+			_, _ = b.q.ClaimBudgetAlert(ctx, dbq.ClaimBudgetAlertParams{BudgetID: r.ID, Month: r.Month, Threshold: 80})
+		}
+		lang := r.Language
+		name := i18n.T(lang, "budget.overall")
+		if r.CategoryID != nil {
+			if c, err := b.q.GetCategory(ctx, dbq.GetCategoryParams{ID: *r.CategoryID, UserID: &r.UserID}); err == nil {
+				name = c.Icon + " " + categoryName(lang, c)
+			}
+		}
+		spent, limit := i18n.Money(lang, r.Spent, r.Currency), i18n.Money(lang, r.Amount, r.Currency)
+		text := i18n.T(lang, "budget.over", html.EscapeString(name), spent, limit)
+		if threshold == 80 {
+			text = i18n.T(lang, "budget.warn", html.EscapeString(name), r.Spent*100/r.Amount, spent, limit)
+		}
+		if _, err := b.tg.SendMessage(ctx, telegram.SendMessage{ChatID: r.TelegramID, Text: text, ParseMode: "HTML"}); err != nil {
+			slog.Warn("scheduler: budget alert", "err", err)
+			continue
+		}
+		b.capture.Event(ctx, r.UserID, "budget_alert", map[string]any{"threshold": threshold, "category": r.CategoryID != nil})
+	}
+}
+
+// dueLines lists installment payments due tomorrow or earlier and debts due today or
+// earlier, so the evening summary doubles as the payment reminder.
+func (b *Bot) dueLines(ctx context.Context, u dbq.User, today time.Time) []string {
+	lang := u.Language
+	when := func(d time.Time) (string, bool) {
+		switch {
+		case d.Before(today):
+			return i18n.T(lang, "due.overdue", d.Format("02.01")), true
+		case d.Equal(today):
+			return i18n.T(lang, "due.today"), true
+		case d.Equal(today.AddDate(0, 0, 1)):
+			return i18n.T(lang, "due.tomorrow"), true
+		}
+		return "", false
+	}
+	var lines []string
+	plans, err := b.capture.Ledger().ListPlans(ctx, u.ID)
+	if err != nil {
+		slog.Warn("scheduler: plans", "err", err)
+	}
+	for _, p := range plans {
+		if p.Next == nil {
+			continue
+		}
+		if w, ok := when(p.Next.DueOn); ok {
+			name := p.Title
+			if p.Provider != "" {
+				name = p.Provider + " · " + p.Title
+			}
+			lines = append(lines, i18n.T(lang, "due.installment", html.EscapeString(name), i18n.Money(lang, p.Next.Amount, p.Currency), w))
+		}
+	}
+	debts, err := b.capture.Ledger().ListDebts(ctx, u.ID)
+	if err != nil {
+		slog.Warn("scheduler: debts", "err", err)
+	}
+	for _, d := range debts {
+		if d.Remaining == 0 || d.DueOn == nil || d.DueOn.After(today) {
+			continue
+		}
+		w, _ := when(*d.DueOn)
+		key := "due.lent"
+		if d.Direction == "borrowed" {
+			key = "due.borrowed"
+		}
+		lines = append(lines, i18n.T(lang, key, html.EscapeString(d.Counterparty), i18n.Money(lang, d.Remaining, d.Currency), w))
+	}
+	return lines
 }
 
 func (b *Bot) sendSummary(ctx context.Context, u dbq.User) {
@@ -122,6 +218,9 @@ func (b *Bot) sendSummary(ctx context.Context, u dbq.User) {
 		text += b.todayText(ctx, u) + "\n\n" + i18n.T(lang, "summary.prompt")
 	} else {
 		text += i18n.T(lang, "summary.none")
+	}
+	if due := b.dueLines(ctx, u, day); len(due) > 0 {
+		text += "\n\n" + i18n.T(lang, "due.title") + "\n" + strings.Join(due, "\n")
 	}
 	kb := &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{{Text: i18n.T(lang, "summary.off"), CallbackData: "n:off"}}}}
 	_, err = b.tg.SendMessage(ctx, telegram.SendMessage{ChatID: u.TelegramID, Text: text, ParseMode: "HTML", ReplyMarkup: kb})

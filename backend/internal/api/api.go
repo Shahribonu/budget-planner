@@ -2,9 +2,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -62,6 +64,21 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 		r.Delete("/transactions/{id}", s.deleteTransaction)
 		r.Post("/transactions/{id}/restore", s.restoreTransaction)
 		r.Get("/summary", s.summary)
+		r.Get("/debts", s.listDebts)
+		r.Post("/debts", s.createDebt)
+		r.Get("/debts/{id}", s.getDebt)
+		r.Patch("/debts/{id}", s.patchDebt)
+		r.Delete("/debts/{id}", s.deleteDebt)
+		r.Post("/debts/{id}/payments", s.payDebt)
+		r.Get("/installments", s.listPlans)
+		r.Post("/installments", s.createPlan)
+		r.Get("/installments/{id}", s.getPlan)
+		r.Delete("/installments/{id}", s.deletePlan)
+		r.Post("/installments/{id}/payments", s.payPlan)
+		r.Get("/budgets", s.listBudgets)
+		r.Post("/budgets", s.createBudget)
+		r.Patch("/budgets/{id}", s.patchBudget)
+		r.Delete("/budgets/{id}", s.deleteBudget)
 	})
 	return r
 }
@@ -182,6 +199,22 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_json", "", "request body is not valid JSON for this endpoint")
+		return false
+	}
+	return true
+}
+
+// decodeTwice decodes the body into v and also into raw, to tell an absent field from null.
+func decodeTwice(w http.ResponseWriter, r *http.Request, v any, raw *map[string]any) bool {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_json", "", "request body is not valid JSON for this endpoint")
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if dec.Decode(v) != nil || json.Unmarshal(body, raw) != nil {
 		writeError(w, http.StatusBadRequest, "bad_json", "", "request body is not valid JSON for this endpoint")
 		return false
 	}

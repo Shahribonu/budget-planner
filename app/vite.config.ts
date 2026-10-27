@@ -16,6 +16,8 @@ export default defineConfig({
     __VUE_PROD_DEVTOOLS__: false,
   },
   server: {
+    // Cloudflare quick tunnels, for opening the dev server inside Telegram.
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       '/api': 'http://localhost:8080',
     },

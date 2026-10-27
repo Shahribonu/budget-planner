@@ -176,9 +176,12 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 }
 
 const listPostings = `-- name: ListPostings :many
-select p.transaction_id, p.account_id, p.amount, p.currency, a.kind
+select p.transaction_id, p.account_id, p.amount, p.currency, a.kind,
+       d.id as debt_id, ip.id as plan_id
 from postings p
 join accounts a on a.id = p.account_id
+left join debts d on d.account_id = a.id
+left join installment_plans ip on ip.account_id = a.id
 where p.transaction_id = any($1::bigint[])
 order by p.transaction_id, p.id
 `
@@ -189,6 +192,8 @@ type ListPostingsRow struct {
 	Amount        int64
 	Currency      string
 	Kind          string
+	DebtID        *int64
+	PlanID        *int64
 }
 
 func (q *Queries) ListPostings(ctx context.Context, transactionIds []int64) ([]ListPostingsRow, error) {
@@ -206,6 +211,8 @@ func (q *Queries) ListPostings(ctx context.Context, transactionIds []int64) ([]L
 			&i.Amount,
 			&i.Currency,
 			&i.Kind,
+			&i.DebtID,
+			&i.PlanID,
 		); err != nil {
 			return nil, err
 		}

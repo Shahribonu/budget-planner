@@ -106,6 +106,8 @@ type Summary struct {
 	Expense    []Money
 	ByCategory []CategoryTotal
 	Recent     []Transaction
+	OwedToMe   []Money // open debts and anything else receivable
+	IOwe       []Money // open debts and installment plans, as positive amounts
 }
 
 // Summary returns Home screen data. month is "YYYY-MM"; empty means the current month
@@ -124,7 +126,7 @@ func (s *Service) Summary(ctx context.Context, userID int64, month string) (Summ
 		return Summary{}, invalid("invalid_month", "month", "month must be YYYY-MM")
 	}
 	to := from.AddDate(0, 1, 0)
-	out := Summary{Month: from.Format("2006-01"), Balances: []Money{}, Income: []Money{}, Expense: []Money{}, ByCategory: []CategoryTotal{}}
+	out := Summary{Month: from.Format("2006-01"), Balances: []Money{}, Income: []Money{}, Expense: []Money{}, ByCategory: []CategoryTotal{}, OwedToMe: []Money{}, IOwe: []Money{}}
 
 	bal, err := q.AssetTotals(ctx, userID)
 	if err != nil {
@@ -152,6 +154,18 @@ func (s *Service) Summary(ctx context.Context, userID int64, month string) (Summ
 	}
 	for _, c := range cats {
 		out.ByCategory = append(out.ByCategory, CategoryTotal{c.CategoryID, c.Amount, c.Currency})
+	}
+
+	owed, err := q.LiabilityTotals(ctx, userID)
+	if err != nil {
+		return Summary{}, err
+	}
+	for _, o := range owed {
+		if o.Kind == "receivable" {
+			out.OwedToMe = append(out.OwedToMe, Money{o.Amount, o.Currency})
+		} else {
+			out.IOwe = append(out.IOwe, Money{-o.Amount, o.Currency})
+		}
 	}
 
 	out.Recent, _, err = s.List(ctx, userID, Filter{Limit: 10})

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/bot"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
@@ -301,6 +302,103 @@ func TestEveningSummary(t *testing.T) {
 				t.Error("summary sent twice")
 			}
 		}
+	}
+}
+
+func TestSummaryRemindsDuePayments(t *testing.T) {
+	pool := testdb.Pool(t)
+	h := setup(t, stt.None{})
+	h.b.HandleUpdate(ctx, h.message("/start"))
+	h.tg.take()
+	var userID, home int64
+	if err := pool.QueryRow(ctx, `select id from users where telegram_id = $1`, h.userID).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `select id from categories where key = 'home'`).Scan(&home); err != nil {
+		t.Fatal(err)
+	}
+	l := ledger.New(pool)
+	loc, _ := time.LoadLocation("Asia/Tashkent")
+	y, m, d := time.Now().In(loc).Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	if _, err := l.CreatePlan(ctx, userID, ledger.NewPlan{Title: "Muzlatkich", Provider: "Uzum Nasiya", CategoryID: home, Currency: "UZS",
+		TotalMinor: 3_000_000_00, Months: 3, FirstDueOn: today.AddDate(0, 0, 1), OccurredOn: today, RecordPurchase: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.CreateDebt(ctx, userID, ledger.NewDebt{Direction: "lent", Counterparty: "Aziz", Currency: "UZS",
+		AmountMinor: 200_000_00, OccurredOn: today, DueOn: ptr(today.AddDate(0, 0, -2))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.CreateDebt(ctx, userID, ledger.NewDebt{Direction: "lent", Counterparty: "Later", Currency: "UZS",
+		AmountMinor: 1_00, OccurredOn: today, DueOn: ptr(today.AddDate(0, 0, 10))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update users set notify_time = (now() at time zone timezone)::time - interval '1 minute' where id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	h.b.Tick(ctx)
+	var text string
+	for _, m := range sent(h.tg.take(), "sendMessage") {
+		if int64(m.body["chat_id"].(float64)) == h.userID {
+			text = m.body["text"].(string)
+		}
+	}
+	for _, want := range []string{"Uzum Nasiya · Muzlatkich", "1\u202f000\u202f000 so'm", "ertaga", "Aziz", "200\u202f000 so'm", "muddati o'tgan"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("summary lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Later") {
+		t.Errorf("debt due in 10 days was included:\n%s", text)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestBudgetAlertsOncePerThreshold(t *testing.T) {
+	pool := testdb.Pool(t)
+	h := setup(t, stt.None{})
+	h.b.HandleUpdate(ctx, h.message("/start"))
+	h.b.HandleUpdate(ctx, h.message("tushlik 50 ming")) // creates the cash account
+	h.tg.take()
+	var userID, cafe int64
+	_ = pool.QueryRow(ctx, `select id from users where telegram_id = $1`, h.userID).Scan(&userID)
+	_ = pool.QueryRow(ctx, `select id from categories where key = 'cafe'`).Scan(&cafe)
+	l := ledger.New(pool)
+	if _, err := l.CreateBudget(ctx, userID, &cafe, "UZS", 100_000_00); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the evening summary out of the way.
+	_, _ = pool.Exec(ctx, `update users set notify_enabled = false where id = $1`, userID)
+
+	alerts := func() []string {
+		h.b.Tick(ctx)
+		var out []string
+		for _, m := range sent(h.tg.take(), "sendMessage") {
+			if int64(m.body["chat_id"].(float64)) == h.userID {
+				out = append(out, m.body["text"].(string))
+			}
+		}
+		return out
+	}
+	if a := alerts(); len(a) != 0 {
+		t.Errorf("at 50%%: %v", a)
+	}
+	h.b.HandleUpdate(ctx, h.message("kofe 35 ming")) // 85%
+	h.tg.take()
+	if a := alerts(); len(a) != 1 || !strings.Contains(a[0], "85%") {
+		t.Errorf("at 85%%: %v", a)
+	}
+	if a := alerts(); len(a) != 0 {
+		t.Errorf("80%% alert repeated: %v", a)
+	}
+	h.b.HandleUpdate(ctx, h.message("kafe 30 ming")) // 115%
+	h.tg.take()
+	if a := alerts(); len(a) != 1 || !strings.Contains(a[0], "tugadi") {
+		t.Errorf("at 115%%: %v", a)
+	}
+	if a := alerts(); len(a) != 0 {
+		t.Errorf("100%% alert repeated: %v", a)
 	}
 }
 

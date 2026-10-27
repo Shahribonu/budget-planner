@@ -34,9 +34,12 @@ where id = @id and user_id = @user_id
 returning *;
 
 -- name: ListPostings :many
-select p.transaction_id, p.account_id, p.amount, p.currency, a.kind
+select p.transaction_id, p.account_id, p.amount, p.currency, a.kind,
+       d.id as debt_id, ip.id as plan_id
 from postings p
 join accounts a on a.id = p.account_id
+left join debts d on d.account_id = a.id
+left join installment_plans ip on ip.account_id = a.id
 where p.transaction_id = any(@transaction_ids::bigint[])
 order by p.transaction_id, p.id;
 

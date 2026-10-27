@@ -207,6 +207,8 @@ type Transaction struct {
 	Description   string
 	Source        string
 	CreatedAt     time.Time
+	DebtID        *int64 // debt and debt_payment
+	PlanID        *int64 // installment and installment_payment
 }
 
 // Record writes a new transaction. If in.SourceRef was already recorded for this source,
@@ -259,8 +261,11 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (Trans
 		if err != nil {
 			return notFound(err)
 		}
-		if Type(row.Type) == Opening {
+		switch Type(row.Type) {
+		case Opening:
 			return invalid("opening_readonly", "type", "opening balances cannot be edited")
+		case DebtTx, DebtPaymentTx, InstallmentTx, InstallmentPaymentTx:
+			return invalid("managed_elsewhere", "type", "edit this in its debt or installment plan")
 		}
 		before, err := load(ctx, q, row)
 		if err != nil {
@@ -312,6 +317,9 @@ func (s *Service) setDeleted(ctx context.Context, userID, id int64, deleted bool
 		row, err := q.GetTransaction(ctx, dbq.GetTransactionParams{ID: id, UserID: userID, WithDeleted: true})
 		if err != nil {
 			return notFound(err)
+		}
+		if t := Type(row.Type); deleted && (t == DebtTx || t == InstallmentTx) {
+			return invalid("managed_elsewhere", "type", "delete the debt or installment plan instead")
 		}
 		if (row.DeletedAt != nil) == deleted {
 			if deleted {
@@ -465,8 +473,12 @@ func loadMany(ctx context.Context, q *dbq.Queries, rows []dbq.Transaction) ([]Tr
 		return nil, err
 	}
 	byTx := map[int64][]dbq.ListPostingsRow{}
+	liability := map[int64]dbq.ListPostingsRow{} // the debt or plan leg, by transaction
 	for _, p := range ps {
-		if p.Kind == "asset" {
+		switch {
+		case p.DebtID != nil || p.PlanID != nil:
+			liability[p.TransactionID] = p
+		case p.Kind == "asset":
 			byTx[p.TransactionID] = append(byTx[p.TransactionID], p)
 		}
 	}
@@ -477,6 +489,17 @@ func loadMany(ctx context.Context, q *dbq.Queries, rows []dbq.Transaction) ([]Tr
 			Description: r.Description, Source: r.Source, CreatedAt: r.CreatedAt,
 		}
 		assets := byTx[r.ID]
+		if l, ok := liability[r.ID]; ok {
+			// Debts and installments: amount is the change in what is owed; the asset
+			// leg, when there is one, is the account money moved through.
+			t.DebtID, t.PlanID = l.DebtID, l.PlanID
+			t.AmountMinor, t.Currency = abs(l.Amount), l.Currency
+			if len(assets) == 1 {
+				t.AccountID = assets[0].AccountID
+			}
+			out[i] = t
+			continue
+		}
 		switch t.Type {
 		case Transfer, Exchange:
 			for _, p := range assets {

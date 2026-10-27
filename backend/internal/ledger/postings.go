@@ -3,7 +3,7 @@ package ledger
 // leg is one side of a transaction before it is written: either a user's asset account
 // or a system account looked up by key and currency.
 type leg struct {
-	asset    int64  // asset account id, 0 for system accounts
+	asset    int64  // account id (asset, receivable or payable); 0 for system accounts
 	system   string // income, expense, opening, fx
 	amount   int64  // debit positive, credit negative
 	currency string

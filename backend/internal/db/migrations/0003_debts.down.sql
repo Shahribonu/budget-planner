@@ -1,0 +1,10 @@
+drop table installment_schedule;
+drop table installment_plans;
+drop table debts;
+alter table transactions drop constraint transactions_category_check;
+alter table transactions add constraint transactions_check check ((type in ('expense', 'income')) = (category_id is not null));
+alter table transactions drop constraint transactions_type_check;
+alter table transactions add constraint transactions_type_check check (type in ('expense', 'income', 'transfer', 'exchange', 'opening'));
+alter table accounts drop constraint accounts_system_has_key;
+alter table accounts drop constraint accounts_asset_no_key;
+alter table accounts add constraint accounts_check1 check ((kind = 'asset') = (system_key is null));

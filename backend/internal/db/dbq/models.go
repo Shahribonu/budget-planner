@@ -34,6 +34,23 @@ type AuditLog struct {
 	At       time.Time
 }
 
+type Budget struct {
+	ID         int64
+	UserID     int64
+	CategoryID *int64
+	Currency   string
+	Amount     int64
+	CreatedAt  time.Time
+	DeletedAt  *time.Time
+}
+
+type BudgetAlert struct {
+	BudgetID  int64
+	Month     string
+	Threshold int32
+	SentAt    time.Time
+}
+
 type Category struct {
 	ID         int64
 	UserID     *int64
@@ -44,6 +61,19 @@ type Category struct {
 	ParentID   *int64
 	Sort       int32
 	ArchivedAt *time.Time
+}
+
+type Debt struct {
+	ID           int64
+	UserID       int64
+	Direction    string
+	Counterparty string
+	AccountID    int64
+	Currency     string
+	DueOn        *time.Time
+	Note         string
+	CreatedAt    time.Time
+	DeletedAt    *time.Time
 }
 
 type Draft struct {
@@ -86,6 +116,28 @@ type IngestionEvent struct {
 	UserID     *int64
 	Kind       string
 	CreatedAt  time.Time
+}
+
+type InstallmentPlan struct {
+	ID               int64
+	UserID           int64
+	Title            string
+	Provider         string
+	CategoryID       int64
+	AccountID        int64
+	Currency         string
+	Total            int64
+	Months           int32
+	PayFromAccountID *int64
+	CreatedAt        time.Time
+	DeletedAt        *time.Time
+}
+
+type InstallmentSchedule struct {
+	PlanID int64
+	N      int32
+	DueOn  time.Time
+	Amount int64
 }
 
 type MerchantRule struct {
