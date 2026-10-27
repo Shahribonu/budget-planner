@@ -146,3 +146,15 @@ func parseNumeral(s string, beforeScale bool) (*big.Rat, bool) {
 	r, ok := new(big.Rat).SetString(s)
 	return r, ok
 }
+
+// Words returns the lowercased words of s with apostrophes unified (o‘n → o'n),
+// skipping numbers and punctuation. Used to match descriptions against keywords.
+func Words(s string) []string {
+	var out []string
+	for _, t := range tokenize(s) {
+		if !t.num && !t.sym && !t.sep {
+			out = append(out, t.low)
+		}
+	}
+	return out
+}

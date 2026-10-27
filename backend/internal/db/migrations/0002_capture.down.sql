@@ -1,0 +1,9 @@
+drop table events;
+drop table merchant_rules;
+drop table drafts;
+drop table ingestion_events;
+alter table users
+    drop column started_at,
+    drop column notify_enabled,
+    drop column notify_time,
+    drop column last_summary_on;

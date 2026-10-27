@@ -1,5 +1,4 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { useAccountsStore } from '@/stores/accounts'
 import { useUserStore } from '@/stores/user'
 import HomeView from '@/views/HomeView.vue'
 
@@ -34,8 +33,7 @@ router.beforeEach(async (to) => {
   const user = useUserStore()
   let onboarded: boolean
   try {
-    const me = await user.load()
-    onboarded = me.onboarded ?? (await useAccountsStore().load()).some((a) => !a.archived)
+    onboarded = (await user.load()).onboarded
   } catch (e) {
     user.error = e
     return true // App.vue renders the error state

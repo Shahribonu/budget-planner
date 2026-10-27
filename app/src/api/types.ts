@@ -25,13 +25,18 @@ export interface User {
   language: Language
   main_currency: Currency
   timezone: string
-  onboarded?: boolean
+  onboarded: boolean
+  notify_enabled: boolean
+  /** HH:MM in the user's time zone. */
+  notify_time: string
 }
 
 export interface UserPatch {
   language?: Language
   main_currency?: Currency
   timezone?: string
+  notify_enabled?: boolean
+  notify_time?: string
 }
 
 export interface Account {

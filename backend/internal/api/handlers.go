@@ -1,9 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
@@ -20,6 +23,14 @@ type userJSON struct {
 	MainCurrency string  `json:"main_currency"`
 	Timezone     string  `json:"timezone"`
 	Onboarded    bool    `json:"onboarded"`
+	// Evening summary in the bot.
+	NotifyEnabled bool   `json:"notify_enabled"`
+	NotifyTime    string `json:"notify_time"` // HH:MM in Timezone
+}
+
+func clock(t pgtype.Time) string {
+	min := t.Microseconds / 60e6
+	return fmt.Sprintf("%02d:%02d", min/60, min%60)
 }
 
 func (s *Server) userResponse(w http.ResponseWriter, r *http.Request, u dbq.User) {
@@ -28,7 +39,7 @@ func (s *Server) userResponse(w http.ResponseWriter, r *http.Request, u dbq.User
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, userJSON{u.ID, u.TelegramID, u.FirstName, u.Username, u.Language, u.MainCurrency, u.Timezone, onboarded})
+	writeJSON(w, http.StatusOK, userJSON{u.ID, u.TelegramID, u.FirstName, u.Username, u.Language, u.MainCurrency, u.Timezone, onboarded, u.NotifyEnabled, clock(u.NotifyTime)})
 }
 
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +48,7 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	_ = s.q.InsertEvent(r.Context(), dbq.InsertEventParams{UserID: &u.ID, Name: "app_open", Props: []byte("{}")})
 	s.userResponse(w, r, u)
 }
 
@@ -44,9 +56,11 @@ var languages = map[string]bool{"uz-Latn": true, "uz-Cyrl": true, "ru": true, "e
 
 func (s *Server) patchMe(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Language     *string `json:"language"`
-		MainCurrency *string `json:"main_currency"`
-		Timezone     *string `json:"timezone"`
+		Language      *string `json:"language"`
+		MainCurrency  *string `json:"main_currency"`
+		Timezone      *string `json:"timezone"`
+		NotifyEnabled *bool   `json:"notify_enabled"`
+		NotifyTime    *string `json:"notify_time"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -65,12 +79,27 @@ func (s *Server) patchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var notifyTime pgtype.Time
+	if in.NotifyTime != nil {
+		t, err := time.Parse("15:04", *in.NotifyTime)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_notify_time", "notify_time", "notify_time must be HH:MM")
+			return
+		}
+		notifyTime = pgtype.Time{Microseconds: int64(t.Hour()*3600+t.Minute()*60) * 1e6, Valid: true}
+	}
 	u, err := s.q.UpdateUserSettings(r.Context(), dbq.UpdateUserSettingsParams{
 		Language: in.Language, MainCurrency: in.MainCurrency, Timezone: in.Timezone, ID: userID(r),
 	})
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	if in.NotifyEnabled != nil || in.NotifyTime != nil {
+		if u, err = s.q.SetNotify(r.Context(), dbq.SetNotifyParams{Enabled: in.NotifyEnabled, NotifyTime: notifyTime, ID: u.ID}); err != nil {
+			s.internal(w, r, err)
+			return
+		}
 	}
 	s.userResponse(w, r, u)
 }

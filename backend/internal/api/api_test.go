@@ -67,6 +67,9 @@ func TestManualTrackingEndToEnd(t *testing.T) {
 		t.Errorf("new user = %v", me)
 	}
 	c.do("PATCH", "/api/me", map[string]any{"language": "uz-Latn", "main_currency": "UZS"}, 200)
+	if me := c.do("PATCH", "/api/me", map[string]any{"notify_enabled": false, "notify_time": "22:15"}, 200); me["notify_enabled"] != false || me["notify_time"] != "22:15" {
+		t.Errorf("notify settings = %v", me)
+	}
 
 	cash := num(c.do("POST", "/api/accounts", map[string]any{"name": "Naqd", "type": "cash", "currency": "UZS", "opening_balance_minor": 1_000_000_00}, 201)["id"])
 	humo := num(c.do("POST", "/api/accounts", map[string]any{"name": "Humo", "type": "humo", "currency": "UZS"}, 201)["id"])
@@ -136,5 +139,6 @@ func TestAPIRejects(t *testing.T) {
 	c.do("POST", "/api/accounts", map[string]any{"name": "X", "type": "cash", "currency": "UZS", "balance": 1}, 400)
 	c.do("POST", "/api/transactions", map[string]any{"type": "expense", "occurred_on": "26.10.2026"}, 400)
 	c.do("PATCH", "/api/me", map[string]any{"timezone": "Mars/Base"}, 422)
+	c.do("PATCH", "/api/me", map[string]any{"notify_time": "25:00"}, 422)
 	c.do("GET", "/api/summary?month=2026-13", nil, 422)
 }

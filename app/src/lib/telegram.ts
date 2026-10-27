@@ -86,14 +86,36 @@ function applyColorScheme(): void {
   if (!inTelegram) media.onchange = applyColorScheme
 }
 
+// Handlers stack so an overlay (e.g. a sheet) can take over BackButton and hand
+// it back to the page underneath when it closes. Only the top handler runs.
+const backHandlers: (() => void)[] = []
+let backBound = false
+
+function onBackClick(): void {
+  backHandlers[backHandlers.length - 1]?.()
+}
+
+function syncBackButton(): void {
+  if (!inTelegram || !webApp) return
+  if (!backBound) {
+    webApp.BackButton.onClick(onBackClick)
+    backBound = true
+  }
+  if (backHandlers.length) webApp.BackButton.show()
+  else webApp.BackButton.hide()
+}
+
 export const backButton = {
   show(onClick: () => void): void {
-    if (!inTelegram || !webApp) return
-    webApp.BackButton.offClick(onClick).onClick(onClick).show()
+    const i = backHandlers.indexOf(onClick)
+    if (i !== -1) backHandlers.splice(i, 1)
+    backHandlers.push(onClick)
+    syncBackButton()
   },
   hide(onClick: () => void): void {
-    if (!inTelegram || !webApp) return
-    webApp.BackButton.offClick(onClick).hide()
+    const i = backHandlers.indexOf(onClick)
+    if (i !== -1) backHandlers.splice(i, 1)
+    syncBackButton()
   },
 }
 

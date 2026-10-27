@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Currency, Language } from '@/api/types'
+import type { Currency, Language, UserPatch } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
@@ -48,6 +48,52 @@ async function setCurrency(currency: Currency) {
     toast.error()
   }
 }
+
+// Local copies so the controls react instantly and can be reverted when PATCH fails.
+const notifyEnabled = ref(user.me?.notify_enabled ?? false)
+const notifyTime = ref(user.me?.notify_time ?? '21:00')
+watch(
+  () => user.me,
+  (me) => {
+    if (!me) return
+    notifyEnabled.value = me.notify_enabled
+    notifyTime.value = me.notify_time
+  },
+)
+
+// Only the latest save may revert, so a slow earlier failure can't undo a newer change.
+let reminderSeq = 0
+
+async function saveReminder(patch: UserPatch, revert: () => void) {
+  const seq = ++reminderSeq
+  try {
+    await user.update(patch)
+    haptic.success()
+  } catch {
+    if (seq === reminderSeq) revert()
+    haptic.error()
+    toast.error()
+  }
+}
+
+function toggleReminder(e: Event) {
+  const enabled = (e.target as HTMLInputElement).checked
+  const previous = notifyEnabled.value
+  notifyEnabled.value = enabled
+  void saveReminder({ notify_enabled: enabled }, () => (notifyEnabled.value = previous))
+}
+
+function changeReminderTime(e: Event) {
+  const input = e.target as HTMLInputElement
+  const time = input.value.slice(0, 5) // some browsers append ":SS"
+  const previous = notifyTime.value
+  if (!/^\d{2}:\d{2}$/.test(time) || time === previous) {
+    input.value = previous // cleared or unchanged: nothing to save
+    return
+  }
+  notifyTime.value = time
+  void saveReminder({ notify_time: time }, () => (notifyTime.value = previous))
+}
 </script>
 
 <template>
@@ -88,6 +134,41 @@ async function setCurrency(currency: Currency) {
       >
         {{ $t('profile.show_archived') }} ({{ archived.length }})
       </button>
+    </section>
+
+    <section class="space-y-3 rounded-2xl bg-surface p-4">
+      <label class="flex items-center justify-between gap-3">
+        <span class="font-medium">{{ $t('profile.reminders') }}</span>
+        <input
+          type="checkbox"
+          role="switch"
+          class="peer sr-only"
+          :checked="notifyEnabled"
+          :aria-checked="notifyEnabled"
+          @change="toggleReminder"
+        />
+        <span
+          aria-hidden="true"
+          class="relative h-7 w-12 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent"
+          :class="notifyEnabled ? 'bg-accent' : 'bg-hint/40'"
+        >
+          <span
+            class="absolute top-0.5 left-0.5 size-6 rounded-full bg-white shadow transition-transform"
+            :class="{ 'translate-x-5': notifyEnabled }"
+          />
+        </span>
+      </label>
+      <p class="text-sm text-hint">{{ $t('profile.reminders_hint') }}</p>
+      <label class="flex items-center justify-between gap-3" :class="{ 'opacity-50': !notifyEnabled }">
+        <span class="text-sm">{{ $t('profile.reminder_time') }}</span>
+        <input
+          type="time"
+          :value="notifyTime"
+          :disabled="!notifyEnabled"
+          class="tabular rounded-lg bg-page px-3 py-2 outline-none"
+          @change="changeReminderTime"
+        />
+      </label>
     </section>
 
     <section class="space-y-3 rounded-2xl bg-surface p-4">

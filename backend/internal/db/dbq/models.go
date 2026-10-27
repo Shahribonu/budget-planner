@@ -6,6 +6,8 @@ package dbq
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Account struct {
@@ -44,6 +46,27 @@ type Category struct {
 	ArchivedAt *time.Time
 }
 
+type Draft struct {
+	ID            int64
+	UserID        int64
+	Status        string
+	Question      string
+	Payload       []byte
+	Source        string
+	SourceRef     string
+	TransactionID *int64
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+}
+
+type Event struct {
+	ID     int64
+	UserID *int64
+	Name   string
+	Props  []byte
+	At     time.Time
+}
+
 type Household struct {
 	ID        int64
 	Name      string
@@ -54,6 +77,25 @@ type HouseholdMember struct {
 	HouseholdID int64
 	UserID      int64
 	Role        string
+}
+
+type IngestionEvent struct {
+	ID         int64
+	Source     string
+	ExternalID string
+	UserID     *int64
+	Kind       string
+	CreatedAt  time.Time
+}
+
+type MerchantRule struct {
+	UserID     int64
+	Pattern    string
+	CategoryID int64
+	AccountID  *int64
+	Origin     string
+	Hits       int32
+	UpdatedAt  time.Time
 }
 
 type Posting struct {
@@ -80,12 +122,16 @@ type Transaction struct {
 }
 
 type User struct {
-	ID           int64
-	TelegramID   int64
-	FirstName    string
-	Username     *string
-	Language     string
-	MainCurrency string
-	Timezone     string
-	CreatedAt    time.Time
+	ID            int64
+	TelegramID    int64
+	FirstName     string
+	Username      *string
+	Language      string
+	MainCurrency  string
+	Timezone      string
+	CreatedAt     time.Time
+	StartedAt     *time.Time
+	NotifyEnabled bool
+	NotifyTime    pgtype.Time
+	LastSummaryOn *time.Time
 }

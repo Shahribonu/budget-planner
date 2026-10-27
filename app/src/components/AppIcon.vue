@@ -13,6 +13,8 @@ const PATHS = {
   swap: 'M7 4 3 8l4 4M3 8h14m0 12 4-4-4-4m4 4H7',
   flag: 'M5 21V4m0 0h12l-2 4 2 4H5',
   chevron: 'm9 18 6-6-6-6',
+  down: 'm6 9 6 6 6-6',
+  check: 'M20 6 9 17l-5-5',
   back: 'm15 18-6-6 6-6',
   trash: 'M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6',
   archive: 'M3 4h18v4H3zm2 4v12h14V8m-9 4h4',

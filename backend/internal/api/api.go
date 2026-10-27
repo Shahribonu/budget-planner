@@ -25,6 +25,8 @@ type Config struct {
 	// DevAuth accepts "Authorization: dev <telegram id>" for local development
 	// outside Telegram. Never enable in production.
 	DevAuth bool
+	// TelegramWebhook, when set, is served at POST /telegram/webhook.
+	TelegramWebhook http.Handler
 }
 
 type Server struct {
@@ -41,6 +43,9 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, requestLog, middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	if cfg.TelegramWebhook != nil {
+		r.Method(http.MethodPost, "/telegram/webhook", cfg.TelegramWebhook)
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(limitBody, s.authenticate)

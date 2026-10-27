@@ -31,6 +31,8 @@ paths:
                 language: { $ref: "#/components/schemas/Language" }
                 main_currency: { $ref: "#/components/schemas/Currency" }
                 timezone: { type: string, example: Asia/Tashkent }
+                notify_enabled: { type: boolean, description: Evening summary in the bot }
+                notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: Local time of the evening summary }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
 
@@ -213,7 +215,7 @@ components:
 
     User:
       type: object
-      required: [id, telegram_id, first_name, language, main_currency, timezone]
+      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time]
       properties:
         id: { type: integer, format: int64 }
         telegram_id: { type: integer, format: int64 }
@@ -223,6 +225,8 @@ components:
         main_currency: { $ref: "#/components/schemas/Currency" }
         timezone: { type: string }
         onboarded: { type: boolean, description: True once the user has at least one account }
+        notify_enabled: { type: boolean, description: Evening summary in the bot }
+        notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: "HH:MM, local time of the evening summary" }
 
     Account:
       type: object

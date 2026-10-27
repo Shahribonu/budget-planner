@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { api } from '@/api/client'
 import { CURRENCIES } from '@/lib/money'
@@ -7,9 +8,11 @@ import type { Currency, Transaction, TransactionFilter, TransactionType } from '
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import OptionSheet, { type SheetOption } from '@/components/OptionSheet.vue'
 import TxRow from '@/components/TxRow.vue'
 import { useFormat } from '@/composables/useFormat'
 import { categoryLabel } from '@/i18n'
+import { ACCOUNT_ICONS } from '@/lib/accounts'
 import { formatDay } from '@/lib/dates'
 import { useAccountsStore } from '@/stores/accounts'
 import { useCategoriesStore } from '@/stores/categories'
@@ -25,6 +28,7 @@ const accounts = useAccountsStore()
 const categories = useCategoriesStore()
 const ledger = useLedgerStore()
 const { dayLabel, lang } = useFormat()
+const { t } = useI18n()
 
 function str(v: LocationQuery[string] | undefined): string | undefined {
   const s = Array.isArray(v) ? v[0] : v
@@ -165,6 +169,69 @@ function clearPeriod() {
   void router.replace({ query })
 }
 
+type FilterKey = 'type' | 'category_id' | 'account_id' | 'currency'
+
+const TYPE_ICONS: Record<TransactionType, string> = {
+  expense: '💸',
+  income: '💰',
+  transfer: '🔁',
+  exchange: '💱',
+  opening: '🏁',
+}
+
+const sheet = ref<FilterKey | null>(null)
+
+/** Query value of a filter as a string (option values are strings), or null when unset. */
+function filterValue(key: FilterKey): string | null {
+  const v = filter.value[key]
+  return v === undefined ? null : String(v)
+}
+
+const FILTERS = computed<{ key: FilterKey; title: string; options: SheetOption<string>[] }[]>(() => [
+  {
+    key: 'type',
+    title: t('activity.type'),
+    options: TYPES.map((v) => ({ value: v, label: t(`types.${v}`), icon: TYPE_ICONS[v] })),
+  },
+  {
+    key: 'category_id',
+    title: t('activity.category'),
+    options: (['expense', 'income'] as const).flatMap((kind) =>
+      categories.ofKind(kind).map((c) => ({
+        value: String(c.id),
+        label: categoryLabel(c),
+        icon: c.icon,
+        group: t(`types.${kind}`),
+      })),
+    ),
+  },
+  {
+    key: 'account_id',
+    title: t('activity.account'),
+    options: accounts.all.map((a) => ({
+      value: String(a.id),
+      label: a.name,
+      icon: ACCOUNT_ICONS[a.type],
+      hint: [t(`account_types.${a.type}`), a.currency, a.archived ? t('profile.archived') : '']
+        .filter(Boolean)
+        .join(' · '),
+    })),
+  },
+  {
+    key: 'currency',
+    title: t('activity.currency'),
+    options: CURRENCIES.map((c) => ({ value: c, label: c, hint: t(`currencies.${c}`) })),
+  },
+])
+
+function chipValue(key: FilterKey): string {
+  const v = filterValue(key)
+  if (v === null) return t('activity.all')
+  const opt = FILTERS.value.find((f) => f.key === key)?.options.find((o) => o.value === v)
+  if (!opt) return '…' // accounts/categories still loading
+  return key === 'category_id' && opt.icon ? `${opt.icon} ${opt.label}` : opt.label
+}
+
 function openTx(id: number) {
   void router.push({ name: 'tx-edit', params: { id } })
 }
@@ -193,58 +260,18 @@ function openTx(id: number) {
         {{ period }} <AppIcon name="x" :size="14" />
       </button>
 
-      <label class="chip" :class="{ 'chip-on': filter.type }">
-        <select
-          :value="filter.type ?? ''"
-          :aria-label="$t('activity.type')"
-          @change="setQuery('type', ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">{{ $t('activity.type') }}: {{ $t('activity.all') }}</option>
-          <option v-for="t in TYPES" :key="t" :value="t">{{ $t(`types.${t}`) }}</option>
-        </select>
-      </label>
-
-      <label class="chip" :class="{ 'chip-on': filter.category_id }">
-        <select
-          :value="filter.category_id ?? ''"
-          :aria-label="$t('activity.category')"
-          @change="setQuery('category_id', ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">{{ $t('activity.category') }}: {{ $t('activity.all') }}</option>
-          <optgroup :label="$t('types.expense')">
-            <option v-for="c in categories.ofKind('expense')" :key="c.id" :value="c.id">
-              {{ c.icon }} {{ categoryLabel(c) }}
-            </option>
-          </optgroup>
-          <optgroup :label="$t('types.income')">
-            <option v-for="c in categories.ofKind('income')" :key="c.id" :value="c.id">
-              {{ c.icon }} {{ categoryLabel(c) }}
-            </option>
-          </optgroup>
-        </select>
-      </label>
-
-      <label class="chip" :class="{ 'chip-on': filter.account_id }">
-        <select
-          :value="filter.account_id ?? ''"
-          :aria-label="$t('activity.account')"
-          @change="setQuery('account_id', ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">{{ $t('activity.account') }}: {{ $t('activity.all') }}</option>
-          <option v-for="a in accounts.all" :key="a.id" :value="a.id">{{ a.name }}</option>
-        </select>
-      </label>
-
-      <label class="chip" :class="{ 'chip-on': filter.currency }">
-        <select
-          :value="filter.currency ?? ''"
-          :aria-label="$t('activity.currency')"
-          @change="setQuery('currency', ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">{{ $t('activity.currency') }}: {{ $t('activity.all') }}</option>
-          <option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option>
-        </select>
-      </label>
+      <button
+        v-for="f in FILTERS"
+        :key="f.key"
+        type="button"
+        class="chip pressable"
+        :class="{ 'chip-on': filterValue(f.key) !== null }"
+        aria-haspopup="dialog"
+        @click="sheet = f.key"
+      >
+        <span class="max-w-44 truncate">{{ f.title }}: {{ chipValue(f.key) }}</span>
+        <AppIcon name="down" :size="14" class="shrink-0 opacity-70" />
+      </button>
 
       <button v-if="hasFilters" type="button" class="chip text-link" @click="clearFilters">
         {{ $t('activity.clear') }}
@@ -271,6 +298,19 @@ function openTx(id: number) {
     <div v-if="loading" class="py-6 text-center text-sm text-hint">{{ $t('common.loading') }}</div>
     <div ref="sentinel" class="h-px" />
   </div>
+
+  <OptionSheet
+    v-for="f in FILTERS"
+    :key="f.key"
+    :open="sheet === f.key"
+    :title="f.title"
+    :options="f.options"
+    :all-label="$t('activity.all')"
+    :searchable="f.key === 'category_id'"
+    :model-value="filterValue(f.key)"
+    @update:open="(v) => !v && sheet === f.key && (sheet = null)"
+    @update:model-value="(v) => setQuery(f.key, v ?? undefined)"
+  />
 </template>
 
 <style scoped>
@@ -281,12 +321,5 @@ function openTx(id: number) {
 }
 .chip-on {
   @apply bg-accent text-on-accent;
-}
-.chip select {
-  @apply max-w-44 appearance-none truncate bg-transparent outline-none;
-}
-.chip select option,
-.chip select optgroup {
-  @apply bg-bg text-text;
 }
 </style>
