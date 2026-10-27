@@ -13,7 +13,7 @@ import (
 const createLiabilityAccount = `-- name: CreateLiabilityAccount :one
 insert into accounts (user_id, kind, name, currency)
 values ($1, $2, $3, $4)
-returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at
+returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at, color, include_in_total
 `
 
 type CreateLiabilityAccountParams struct {
@@ -45,6 +45,8 @@ func (q *Queries) CreateLiabilityAccount(ctx context.Context, arg CreateLiabilit
 		&i.CardMask,
 		&i.BankBalance,
 		&i.BankBalanceAt,
+		&i.Color,
+		&i.IncludeInTotal,
 	)
 	return i, err
 }

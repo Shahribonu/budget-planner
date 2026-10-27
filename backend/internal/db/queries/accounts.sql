@@ -7,7 +7,7 @@ returning *;
 select * from accounts where id = @id and user_id = @user_id and kind = 'asset';
 
 -- name: ListAssetAccounts :many
-select a.id, a.name, a.type, a.currency, a.archived_at,
+select a.id, a.name, a.type, a.currency, a.archived_at, a.color, a.include_in_total, a.card_mask,
        coalesce(sum(p.amount) filter (where t.deleted_at is null), 0)::bigint as balance
 from accounts a
 left join postings p on p.account_id = a.id
@@ -26,6 +26,8 @@ where p.account_id = @account_id and t.deleted_at is null;
 -- name: UpdateAssetAccount :one
 update accounts
 set name        = coalesce(sqlc.narg(name), name),
+    color       = case when @set_color::bool then sqlc.narg(color)::text else color end,
+    include_in_total = coalesce(sqlc.narg(include_in_total), include_in_total),
     archived_at = case
         when sqlc.narg(archived)::bool is null then archived_at
         when sqlc.narg(archived)::bool then coalesce(archived_at, now())

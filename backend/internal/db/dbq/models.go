@@ -11,19 +11,21 @@ import (
 )
 
 type Account struct {
-	ID            int64
-	UserID        int64
-	HouseholdID   *int64
-	Kind          string
-	Type          *string
-	Name          string
-	Currency      string
-	SystemKey     *string
-	ArchivedAt    *time.Time
-	CreatedAt     time.Time
-	CardMask      *string
-	BankBalance   *int64
-	BankBalanceAt *time.Time
+	ID             int64
+	UserID         int64
+	HouseholdID    *int64
+	Kind           string
+	Type           *string
+	Name           string
+	Currency       string
+	SystemKey      *string
+	ArchivedAt     *time.Time
+	CreatedAt      time.Time
+	CardMask       *string
+	BankBalance    *int64
+	BankBalanceAt  *time.Time
+	Color          *string
+	IncludeInTotal bool
 }
 
 type AuditLog struct {

@@ -28,6 +28,7 @@ type userJSON struct {
 	// Evening summary in the bot.
 	NotifyEnabled bool       `json:"notify_enabled"`
 	NotifyTime    string     `json:"notify_time"` // HH:MM in Timezone
+	CreatedAt     time.Time  `json:"created_at"`
 	Premium       bool       `json:"premium"`
 	PremiumUntil  *time.Time `json:"premium_until"`
 	TrialUsed     bool       `json:"trial_used"`
@@ -45,7 +46,7 @@ func (s *Server) userResponse(w http.ResponseWriter, r *http.Request, u dbq.User
 		return
 	}
 	writeJSON(w, http.StatusOK, userJSON{u.ID, u.TelegramID, u.FirstName, u.Username, u.Language, u.MainCurrency, u.Timezone, onboarded,
-		u.NotifyEnabled, clock(u.NotifyTime), billing.Active(u, s.now()), u.PremiumUntil, u.TrialStartedAt != nil})
+		u.NotifyEnabled, clock(u.NotifyTime), u.CreatedAt, billing.Active(u, s.now()), u.PremiumUntil, u.TrialStartedAt != nil})
 }
 
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
@@ -113,16 +114,19 @@ func (s *Server) patchMe(w http.ResponseWriter, r *http.Request) {
 // ---- accounts ----
 
 type accountJSON struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Currency     string `json:"currency"`
-	BalanceMinor int64  `json:"balance_minor"`
-	Archived     bool   `json:"archived"`
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	Type           string  `json:"type"`
+	Currency       string  `json:"currency"`
+	BalanceMinor   int64   `json:"balance_minor"`
+	Archived       bool    `json:"archived"`
+	Color          *string `json:"color"`
+	IncludeInTotal bool    `json:"include_in_total"`
+	CardMask       *string `json:"card_mask"`
 }
 
 func toAccountJSON(a ledger.Account) accountJSON {
-	return accountJSON{a.ID, a.Name, a.Type, a.Currency, a.BalanceMinor, a.Archived}
+	return accountJSON{a.ID, a.Name, a.Type, a.Currency, a.BalanceMinor, a.Archived, a.Color, a.IncludeInTotal, a.CardMask}
 }
 
 func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
@@ -161,14 +165,24 @@ func (s *Server) patchAccount(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// color and card_mask: absent keeps, null clears, a value sets.
+	var raw map[string]any
 	var in struct {
-		Name     *string `json:"name"`
-		Archived *bool   `json:"archived"`
+		Name           *string `json:"name"`
+		Archived       *bool   `json:"archived"`
+		Color          *string `json:"color"`
+		IncludeInTotal *bool   `json:"include_in_total"`
+		CardMask       *string `json:"card_mask"`
 	}
-	if !decode(w, r, &in) {
+	if !decodeTwice(w, r, &in, &raw) {
 		return
 	}
-	a, err := s.ledger.UpdateAccount(r.Context(), userID(r), id, ledger.AccountPatch(in))
+	_, setColor := raw["color"]
+	_, setMask := raw["card_mask"]
+	a, err := s.ledger.UpdateAccount(r.Context(), userID(r), id, ledger.AccountPatch{
+		Name: in.Name, Archived: in.Archived, SetColor: setColor, Color: in.Color,
+		IncludeInTotal: in.IncludeInTotal, SetCardMask: setMask, CardMask: in.CardMask,
+	})
 	if err != nil {
 		s.fail(w, r, err)
 		return

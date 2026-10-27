@@ -48,7 +48,7 @@ func (q *Queries) FindSameDayDuplicate(ctx context.Context, arg FindSameDayDupli
 }
 
 const getAccountByCard = `-- name: GetAccountByCard :one
-select id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at from accounts
+select id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at, color, include_in_total from accounts
 where user_id = $1 and card_mask = $2 and kind = 'asset' and archived_at is null
 `
 
@@ -74,6 +74,8 @@ func (q *Queries) GetAccountByCard(ctx context.Context, arg GetAccountByCardPara
 		&i.CardMask,
 		&i.BankBalance,
 		&i.BankBalanceAt,
+		&i.Color,
+		&i.IncludeInTotal,
 	)
 	return i, err
 }

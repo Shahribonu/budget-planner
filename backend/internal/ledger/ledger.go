@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -81,12 +82,15 @@ func (s *Service) today(u dbq.User) time.Time {
 // ---- accounts ----
 
 type Account struct {
-	ID           int64
-	Name         string
-	Type         string
-	Currency     string
-	BalanceMinor int64
-	Archived     bool
+	ID             int64
+	Name           string
+	Type           string
+	Currency       string
+	BalanceMinor   int64
+	Archived       bool
+	Color          *string // "#RRGGBB"; nil lets the app pick by type
+	IncludeInTotal bool
+	CardMask       *string // last four digits
 }
 
 type NewAccount struct {
@@ -131,7 +135,7 @@ func (s *Service) CreateAccount(ctx context.Context, userID int64, in NewAccount
 				return err
 			}
 		}
-		out = Account{ID: a.ID, Name: a.Name, Type: in.Type, Currency: a.Currency, BalanceMinor: in.OpeningBalanceMinor}
+		out = Account{ID: a.ID, Name: a.Name, Type: in.Type, Currency: a.Currency, BalanceMinor: in.OpeningBalanceMinor, IncludeInTotal: true}
 		return audit(ctx, q, userID, "account", a.ID, "create", nil, out)
 	})
 	return out, err
@@ -144,15 +148,24 @@ func (s *Service) ListAccounts(ctx context.Context, userID int64, includeArchive
 	}
 	out := make([]Account, len(rows))
 	for i, r := range rows {
-		out[i] = Account{ID: r.ID, Name: r.Name, Type: deref(r.Type), Currency: r.Currency, BalanceMinor: r.Balance, Archived: r.ArchivedAt != nil}
+		out[i] = Account{ID: r.ID, Name: r.Name, Type: deref(r.Type), Currency: r.Currency, BalanceMinor: r.Balance, Archived: r.ArchivedAt != nil,
+			Color: r.Color, IncludeInTotal: r.IncludeInTotal, CardMask: r.CardMask}
 	}
 	return out, nil
 }
 
 type AccountPatch struct {
-	Name     *string
-	Archived *bool
+	Name           *string
+	Archived       *bool
+	SetColor       bool
+	Color          *string
+	IncludeInTotal *bool
+	SetCardMask    bool
+	CardMask       *string
 }
+
+var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+var maskRe = regexp.MustCompile(`^[0-9]{4}$`)
 
 func (s *Service) UpdateAccount(ctx context.Context, userID, id int64, p AccountPatch) (Account, error) {
 	if p.Name != nil {
@@ -162,17 +175,36 @@ func (s *Service) UpdateAccount(ctx context.Context, userID, id int64, p Account
 		}
 		p.Name = &n
 	}
+	if p.SetColor && p.Color != nil && !colorRe.MatchString(*p.Color) {
+		return Account{}, invalid("invalid_color", "color", "color must be #RRGGBB")
+	}
+	if p.SetCardMask && p.CardMask != nil && !maskRe.MatchString(*p.CardMask) {
+		return Account{}, invalid("invalid_card_mask", "card_mask", "card must be the last 4 digits")
+	}
 	var out Account
 	err := s.inTx(ctx, func(q *dbq.Queries) error {
-		a, err := q.UpdateAssetAccount(ctx, dbq.UpdateAssetAccountParams{Name: p.Name, Archived: p.Archived, ID: id, UserID: userID})
+		a, err := q.UpdateAssetAccount(ctx, dbq.UpdateAssetAccountParams{Name: p.Name, Archived: p.Archived, SetColor: p.SetColor,
+			Color: p.Color, IncludeInTotal: p.IncludeInTotal, ID: id, UserID: userID})
 		if err != nil {
 			return notFound(err)
+		}
+		if p.SetCardMask {
+			if p.CardMask != nil {
+				if err := q.ReleaseCardMask(ctx, dbq.ReleaseCardMaskParams{UserID: userID, CardMask: p.CardMask}); err != nil {
+					return err
+				}
+			}
+			if err := q.SetCardMask(ctx, dbq.SetCardMaskParams{CardMask: p.CardMask, ID: id, UserID: userID}); err != nil {
+				return err
+			}
+			a.CardMask = p.CardMask
 		}
 		bal, err := q.AccountBalance(ctx, a.ID)
 		if err != nil {
 			return err
 		}
-		out = Account{ID: a.ID, Name: a.Name, Type: deref(a.Type), Currency: a.Currency, BalanceMinor: bal, Archived: a.ArchivedAt != nil}
+		out = Account{ID: a.ID, Name: a.Name, Type: deref(a.Type), Currency: a.Currency, BalanceMinor: bal, Archived: a.ArchivedAt != nil,
+			Color: a.Color, IncludeInTotal: a.IncludeInTotal, CardMask: a.CardMask}
 		return audit(ctx, q, userID, "account", a.ID, "update", nil, out)
 	})
 	return out, err

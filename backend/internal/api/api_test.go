@@ -119,6 +119,18 @@ func TestManualTrackingEndToEnd(t *testing.T) {
 	if n := len(list["transactions"].([]any)); n != 1 {
 		t.Errorf("list = %d items", n)
 	}
+	styled := c.do("PATCH", fmt.Sprintf("/api/accounts/%d", humo), map[string]any{"color": "#5B3DF5", "card_mask": "5958", "include_in_total": false}, 200)
+	if styled["color"] != "#5B3DF5" || styled["card_mask"] != "5958" || styled["include_in_total"] != false {
+		t.Errorf("styled account = %v", styled)
+	}
+	if bal := c.do("GET", "/api/summary", nil, 200)["balances"].([]any)[0].(map[string]any); num(bal["amount_minor"]) != 770_000_00 {
+		t.Errorf("balance should leave out humo = %v", bal)
+	}
+	c.do("PATCH", fmt.Sprintf("/api/accounts/%d", humo), map[string]any{"color": "violet"}, 422)
+	c.do("PATCH", fmt.Sprintf("/api/accounts/%d", humo), map[string]any{"card_mask": "12345"}, 422)
+	if got := c.do("PATCH", fmt.Sprintf("/api/accounts/%d", humo), map[string]any{"color": nil, "card_mask": nil, "include_in_total": true}, 200); got["color"] != nil || got["card_mask"] != nil {
+		t.Errorf("cleared = %v", got)
+	}
 	accs := c.do("GET", "/api/accounts", nil, 200)["accounts"].([]any)
 	if got := num(accs[0].(map[string]any)["balance_minor"]); got != 770_000_00 {
 		t.Errorf("cash balance = %d, want 770 000 so'm", got/100)

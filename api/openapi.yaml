@@ -68,7 +68,7 @@ paths:
   /accounts/{id}:
     parameters: [{ $ref: "#/components/parameters/Id" }]
     patch:
-      summary: Rename or archive an account
+      summary: Rename, archive or style an account. color and card_mask accept null to clear.
       requestBody:
         content:
           application/json:
@@ -77,6 +77,9 @@ paths:
               properties:
                 name: { type: string, maxLength: 64 }
                 archived: { type: boolean }
+                color: { type: [string, "null"], pattern: "^#[0-9a-fA-F]{6}$" }
+                include_in_total: { type: boolean, description: "false leaves this account out of Summary.balances (e.g. savings)" }
+                card_mask: { type: [string, "null"], pattern: "^[0-9]{4}$", description: "Last 4 digits; forwarded bank messages for this card land here. Moves the card from any other account." }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -582,7 +585,7 @@ components:
 
     User:
       type: object
-      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, premium, premium_until, trial_used]
+      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, created_at, premium, premium_until, trial_used]
       properties:
         id: { type: integer, format: int64 }
         telegram_id: { type: integer, format: int64 }
@@ -594,13 +597,14 @@ components:
         onboarded: { type: boolean, description: True once the user has at least one account }
         notify_enabled: { type: boolean, description: Evening summary in the bot }
         notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: "HH:MM, local time of the evening summary" }
+        created_at: { type: string, format: date-time, description: First contact with the bot or app ("with us since") }
         premium: { type: boolean, description: Premium is active now (paid or trial) }
         premium_until: { type: [string, "null"], format: date-time }
         trial_used: { type: boolean, description: "The one-time 7-day trial (granted after 7 logged days) was already given" }
 
     Account:
       type: object
-      required: [id, name, type, currency, balance_minor, archived]
+      required: [id, name, type, currency, balance_minor, archived, color, include_in_total, card_mask]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -608,6 +612,9 @@ components:
         currency: { $ref: "#/components/schemas/Currency" }
         balance_minor: { type: integer, format: int64 }
         archived: { type: boolean }
+        color: { type: [string, "null"], description: "#RRGGBB; null lets the app choose by type" }
+        include_in_total: { type: boolean }
+        card_mask: { type: [string, "null"], description: Last 4 digits of the card }
 
     Category:
       type: object
@@ -829,7 +836,7 @@ components:
       required: [month, balances, income, expense, by_category, recent, owed_to_me, i_owe, installments]
       properties:
         month: { type: string, example: 2026-10 }
-        balances: { type: array, description: Total of asset accounts per currency, items: { $ref: "#/components/schemas/Money" } }
+        balances: { type: array, description: Total of asset accounts with include_in_total per currency, items: { $ref: "#/components/schemas/Money" } }
         income: { type: array, items: { $ref: "#/components/schemas/Money" } }
         expense: { type: array, items: { $ref: "#/components/schemas/Money" } }
         by_category:

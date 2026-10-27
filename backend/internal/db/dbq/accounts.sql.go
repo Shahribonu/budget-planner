@@ -27,7 +27,7 @@ func (q *Queries) AccountBalance(ctx context.Context, accountID int64) (int64, e
 const createAssetAccount = `-- name: CreateAssetAccount :one
 insert into accounts (user_id, kind, type, name, currency)
 values ($1, 'asset', $2, $3, $4)
-returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at
+returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at, color, include_in_total
 `
 
 type CreateAssetAccountParams struct {
@@ -59,6 +59,8 @@ func (q *Queries) CreateAssetAccount(ctx context.Context, arg CreateAssetAccount
 		&i.CardMask,
 		&i.BankBalance,
 		&i.BankBalanceAt,
+		&i.Color,
+		&i.IncludeInTotal,
 	)
 	return i, err
 }
@@ -91,7 +93,7 @@ func (q *Queries) EnsureSystemAccount(ctx context.Context, arg EnsureSystemAccou
 }
 
 const getAssetAccount = `-- name: GetAssetAccount :one
-select id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at from accounts where id = $1 and user_id = $2 and kind = 'asset'
+select id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at, color, include_in_total from accounts where id = $1 and user_id = $2 and kind = 'asset'
 `
 
 type GetAssetAccountParams struct {
@@ -116,12 +118,14 @@ func (q *Queries) GetAssetAccount(ctx context.Context, arg GetAssetAccountParams
 		&i.CardMask,
 		&i.BankBalance,
 		&i.BankBalanceAt,
+		&i.Color,
+		&i.IncludeInTotal,
 	)
 	return i, err
 }
 
 const listAssetAccounts = `-- name: ListAssetAccounts :many
-select a.id, a.name, a.type, a.currency, a.archived_at,
+select a.id, a.name, a.type, a.currency, a.archived_at, a.color, a.include_in_total, a.card_mask,
        coalesce(sum(p.amount) filter (where t.deleted_at is null), 0)::bigint as balance
 from accounts a
 left join postings p on p.account_id = a.id
@@ -138,12 +142,15 @@ type ListAssetAccountsParams struct {
 }
 
 type ListAssetAccountsRow struct {
-	ID         int64
-	Name       string
-	Type       *string
-	Currency   string
-	ArchivedAt *time.Time
-	Balance    int64
+	ID             int64
+	Name           string
+	Type           *string
+	Currency       string
+	ArchivedAt     *time.Time
+	Color          *string
+	IncludeInTotal bool
+	CardMask       *string
+	Balance        int64
 }
 
 func (q *Queries) ListAssetAccounts(ctx context.Context, arg ListAssetAccountsParams) ([]ListAssetAccountsRow, error) {
@@ -161,6 +168,9 @@ func (q *Queries) ListAssetAccounts(ctx context.Context, arg ListAssetAccountsPa
 			&i.Type,
 			&i.Currency,
 			&i.ArchivedAt,
+			&i.Color,
+			&i.IncludeInTotal,
+			&i.CardMask,
 			&i.Balance,
 		); err != nil {
 			return nil, err
@@ -176,25 +186,33 @@ func (q *Queries) ListAssetAccounts(ctx context.Context, arg ListAssetAccountsPa
 const updateAssetAccount = `-- name: UpdateAssetAccount :one
 update accounts
 set name        = coalesce($1, name),
+    color       = case when $2::bool then $3::text else color end,
+    include_in_total = coalesce($4, include_in_total),
     archived_at = case
-        when $2::bool is null then archived_at
-        when $2::bool then coalesce(archived_at, now())
+        when $5::bool is null then archived_at
+        when $5::bool then coalesce(archived_at, now())
         else null
     end
-where id = $3 and user_id = $4 and kind = 'asset'
-returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at
+where id = $6 and user_id = $7 and kind = 'asset'
+returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at, color, include_in_total
 `
 
 type UpdateAssetAccountParams struct {
-	Name     *string
-	Archived *bool
-	ID       int64
-	UserID   int64
+	Name           *string
+	SetColor       bool
+	Color          *string
+	IncludeInTotal *bool
+	Archived       *bool
+	ID             int64
+	UserID         int64
 }
 
 func (q *Queries) UpdateAssetAccount(ctx context.Context, arg UpdateAssetAccountParams) (Account, error) {
 	row := q.db.QueryRow(ctx, updateAssetAccount,
 		arg.Name,
+		arg.SetColor,
+		arg.Color,
+		arg.IncludeInTotal,
 		arg.Archived,
 		arg.ID,
 		arg.UserID,
@@ -214,6 +232,8 @@ func (q *Queries) UpdateAssetAccount(ctx context.Context, arg UpdateAssetAccount
 		&i.CardMask,
 		&i.BankBalance,
 		&i.BankBalanceAt,
+		&i.Color,
+		&i.IncludeInTotal,
 	)
 	return i, err
 }

@@ -15,7 +15,7 @@ select p.currency, sum(p.amount)::bigint as amount
 from postings p
 join transactions t on t.id = p.transaction_id
 join accounts a on a.id = p.account_id
-where a.user_id = $1 and a.kind = 'asset' and t.deleted_at is null
+where a.user_id = $1 and a.kind = 'asset' and a.include_in_total and t.deleted_at is null
 group by p.currency
 order by p.currency
 `
