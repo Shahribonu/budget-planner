@@ -6,6 +6,7 @@ import { i18n } from '@/i18n'
 import { haptic } from '@/lib/telegram'
 import { useAccountsStore } from './accounts'
 import { useBudgetsStore } from './budgets'
+import { useMonthlyPlanStore } from './monthlyPlan'
 import { useDebtsStore } from './debts'
 import { useInstallmentsStore } from './installments'
 import { useToastStore } from './toast'
@@ -28,6 +29,8 @@ export const useLedgerStore = defineStore('ledger', () => {
     if (debts.loaded) void debts.load(true).catch(() => {})
     const plans = useInstallmentsStore()
     if (plans.loaded) void plans.load(true).catch(() => {})
+    const plan = useMonthlyPlanStore()
+    if (plan.view) void plan.load().catch(() => {})
     const budgets = useBudgetsStore()
     if (budgets.data) void budgets.load(true).catch(() => {})
   }

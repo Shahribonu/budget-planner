@@ -41,6 +41,10 @@ export interface User {
   notify_enabled: boolean
   /** HH:MM in the user's time zone. */
   notify_time: string
+  /** Active now, paid or trial (the API doesn't tell them apart). */
+  premium: boolean
+  premium_until: string | null
+  trial_used: boolean
 }
 
 export interface UserPatch {
@@ -264,4 +268,150 @@ export interface BudgetCreate {
   category_id: number | null
   currency: Currency
   amount_minor: number
+}
+
+export type PlanPriority = 'must' | 'should' | 'nice'
+export type PlanItemStatus = 'planned' | 'bought' | 'postponed' | 'dropped'
+export type PlanGroup = 'fits' | 'later' | 'reconsider'
+export type PlanReason =
+  | 'must'
+  | 'fixed_date'
+  | 'fits'
+  | 'before_salary'
+  | 'not_enough'
+  | 'too_large'
+  | 'postponed'
+  | 'must_shortfall'
+
+export interface NewPlanItem {
+  title: string
+  category_id?: number | null
+  amount_min_minor: number
+  /** 0 or omitted: same as min. The plan uses the max. */
+  amount_max_minor?: number
+  priority: PlanPriority
+  due_on?: string | null
+  note?: string
+}
+
+export interface PlanItemPatch {
+  title?: string
+  category_id?: number | null
+  amount_min_minor?: number
+  amount_max_minor?: number
+  priority?: PlanPriority
+  due_on?: string | null
+  status?: PlanItemStatus
+  transaction_id?: number | null
+  note?: string
+}
+
+export interface PlanDecision {
+  group: PlanGroup
+  reason: PlanReason
+  /** YYYY-MM when it becomes affordable. */
+  suggest_month: string | null
+  monthly_saving_minor: number
+  months: number
+  from_savings_minor: number
+  /** Fits group only: free money left after this item and those placed before it. */
+  left_after_minor: number | null
+}
+
+export interface PlanItem {
+  id: number
+  title: string
+  category_id: number | null
+  amount_min_minor: number
+  amount_max_minor: number
+  priority: PlanPriority
+  due_on: string | null
+  status: PlanItemStatus
+  postponed_count: number
+  transaction_id: number | null
+  note: string
+  /** Only for planned items. */
+  decision: PlanDecision | null
+}
+
+export interface PlanLine {
+  kind: 'recurring' | 'installment' | 'debt'
+  /** The recurring item, installment plan or debt this line comes from. */
+  ref_id: number
+  title: string
+  amount_minor: number
+  due_on: string | null
+}
+
+export interface PlanView {
+  month: string
+  currency: Currency
+  inputs: {
+    income_minor: number
+    income_source: 'override' | 'recurring' | 'history' | 'none'
+    income_override: boolean
+    income_day: number
+    reserved_minor: number
+    lines: PlanLine[]
+    savings_minor: number
+    /** Everyday spending for the month. */
+    buffer_minor: number
+    buffer_source: 'override' | 'history' | 'none'
+    buffer_override: boolean
+    cash_now_minor: number
+  }
+  result: { free_minor: number; allocated_minor: number; left_minor: number }
+  items: PlanItem[]
+}
+
+/** absent keeps, null clears (back to the estimate), a value sets. */
+export interface PlanPatch {
+  income_override?: number | null
+  income_day?: number | null
+  savings_minor?: number
+  buffer_override?: number | null
+}
+
+export interface Recurring {
+  id: number
+  kind: 'income' | 'expense'
+  title: string
+  category_id: number | null
+  currency: Currency
+  amount_minor: number
+  day_of_month: number
+  account_id: number | null
+}
+
+export interface RecurringCreate {
+  kind: 'income' | 'expense'
+  title: string
+  category_id?: number | null
+  currency: Currency
+  amount_minor: number
+  day_of_month: number
+  account_id?: number | null
+}
+
+/** Kind and currency are fixed; category (same kind) and account (same currency) accept null to clear. */
+export interface RecurringPatch {
+  title?: string
+  amount_minor?: number
+  day_of_month?: number
+  category_id?: number | null
+  account_id?: number | null
+}
+
+export type PremiumPlan = 'monthly' | 'yearly'
+
+export interface Invoice {
+  url: string
+  stars: number
+}
+
+export interface BillingPlans {
+  monthly_stars: number
+  yearly_stars: number
+  /** Budgets allowed on the free plan. */
+  free_budgets: number
 }

@@ -18,6 +18,7 @@ export const router = createRouter({
     { path: '/', name: 'home', component: HomeView, meta: { tabs: true } },
     { path: '/activity', name: 'activity', component: () => import('@/views/ActivityView.vue'), meta: { tabs: true } },
     { path: '/plan', name: 'plan', component: () => import('@/views/PlanView.vue'), meta: { tabs: true } },
+    { path: '/recurring', name: 'recurring', component: () => import('@/views/RecurringView.vue'), meta: { sub: true } },
     { path: '/debts', name: 'debts', component: () => import('@/views/DebtsView.vue'), meta: { sub: true } },
     { path: '/debts/new', name: 'debt-new', component: () => import('@/views/DebtFormView.vue'), meta: { sub: true } },
     { path: '/debts/:id(\\d+)', name: 'debt', component: () => import('@/views/DebtView.vue'), meta: { sub: true } },

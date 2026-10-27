@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n'
 import type { Currency, Language, UserPatch } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PremiumOffer from '@/components/PremiumOffer.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import { useFormat } from '@/composables/useFormat'
 import { LANGUAGES, setLanguage } from '@/i18n'
 import { ACCOUNT_ICONS } from '@/lib/accounts'
+import { formatDateNumeric } from '@/lib/dates'
 import { CURRENCIES } from '@/lib/money'
 import { haptic } from '@/lib/telegram'
 import { useAccountsStore } from '@/stores/accounts'
@@ -199,6 +201,22 @@ function changeReminderTime(e: Event) {
           @update:model-value="setCurrency"
         />
       </div>
+    </section>
+
+    <section class="space-y-3 rounded-2xl bg-surface p-4" :aria-label="$t('premium.title')">
+      <h2 class="flex items-center gap-1.5 font-semibold">⭐ {{ $t('premium.title') }}</h2>
+      <!-- Trial and paid look the same in the API, so both just show the end date. -->
+      <template v-if="user.me?.premium">
+        <p v-if="user.me.premium_until" class="font-medium">
+          {{ $t('premium.until', { date: formatDateNumeric(user.me.premium_until, user.me.timezone) }) }}
+        </p>
+        <p class="text-sm text-hint">{{ $t('premium.active_thanks') }}</p>
+        <p class="text-xs text-hint">{{ $t('premium.manage_hint') }}</p>
+      </template>
+      <template v-else>
+        <p v-if="!user.me?.trial_used" class="rounded-xl bg-accent/10 px-3 py-2 text-sm">🎁 {{ $t('premium.trial_hint') }}</p>
+        <PremiumOffer />
+      </template>
     </section>
   </div>
 </template>

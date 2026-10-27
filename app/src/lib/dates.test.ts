@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, formatDay, formatMonth, monthRange, todayISO } from './dates'
+import { addDays, formatDateNumeric, formatDay, formatMonth, monthRange, todayISO } from './dates'
 
 describe('dates', () => {
   it('computes today in the user time zone', () => {
@@ -30,5 +30,10 @@ describe('dates', () => {
   it('formats other locales with Intl', () => {
     expect(formatDay('2026-10-05', 'en')).toBe('October 5')
     expect(formatDay('2026-10-05', 'ru')).toBe('5 октября')
+  })
+
+  it('formats an instant as DD.MM.YYYY in the user time zone', () => {
+    expect(formatDateNumeric('2026-11-30T20:00:00Z', 'Asia/Tashkent')).toBe('01.12.2026')
+    expect(formatDateNumeric('2026-11-30T20:00:00Z', 'UTC')).toBe('30.11.2026')
   })
 })

@@ -5,6 +5,7 @@ import type { Budget, Currency, Installment } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import BudgetBar from '@/components/BudgetBar.vue'
 import BudgetSheet from '@/components/BudgetSheet.vue'
+import MonthlyPlanSection from '@/components/plan/MonthlyPlanSection.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -77,6 +78,8 @@ const soonest = computed<Installment | undefined>(() =>
   <PageHeader :title="$t('plan.title')" />
 
   <div class="space-y-3 px-4">
+    <MonthlyPlanSection />
+
     <!-- Budgets -->
     <div class="flex items-center justify-between px-1 pt-1">
       <h2 class="text-sm font-medium text-hint">{{ $t('budgets.title') }}</h2>

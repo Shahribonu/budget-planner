@@ -16,6 +16,7 @@ import AmountInput from './AmountInput.vue'
 import AppIcon from './AppIcon.vue'
 import BottomSheet from './BottomSheet.vue'
 import PickerField from './PickerField.vue'
+import PremiumOffer from './PremiumOffer.vue'
 import SegmentedControl from './SegmentedControl.vue'
 
 /** Add a budget, or edit the limit of / delete an existing one (`budget` set). */
@@ -36,12 +37,35 @@ const currency = ref<Currency>(user.mainCurrency)
 const amount = ref('')
 const busy = ref(false)
 const targetError = ref('')
+const needsPremium = ref(false)
+// Paid, but the server hadn't turned Premium on yet when we stopped polling.
+const paymentPending = ref(false)
+// Once paid, never offer the buy buttons again in this sheet: a repeat 422 means "not recorded yet".
+const paid = ref(false)
+
+function onPaid(result: 'active' | 'pending') {
+  paid.value = true
+  if (result === 'pending') {
+    paymentPending.value = true
+    return
+  }
+  retryAfterPayment()
+}
+
+function retryAfterPayment() {
+  needsPremium.value = false
+  paymentPending.value = false
+  void save()
+}
 const amountError = ref('')
 
 watch(open, (isOpen) => {
   if (!isOpen) return
   targetError.value = ''
   amountError.value = ''
+  needsPremium.value = false
+  paymentPending.value = false
+  paid.value = false
   const b = props.budget
   currency.value = b?.currency ?? user.mainCurrency
   amount.value = b ? toInputValue(b.amount_minor, b.currency) : ''
@@ -98,9 +122,13 @@ async function save() {
     toast.show(t('common.saved'))
     open.value = false
   } catch (e) {
-    haptic.error()
     const { field, code, message } = invalidField(e)
-    if (code === 'budget_exists') targetError.value = t('budgets.err_exists', { currency: currency.value })
+    if (code !== 'premium_required') haptic.error()
+    if (code === 'premium_required') {
+      // Only after the user tried: the upsell appears in place, and paying retries the save.
+      needsPremium.value = true
+      paymentPending.value = paid.value
+    } else if (code === 'budget_exists') targetError.value = t('budgets.err_exists', { currency: currency.value })
     else if (field === 'amount_minor') amountError.value = message
     else if (field === 'category_id') targetError.value = message
     else toast.error()
@@ -159,7 +187,25 @@ const currencyOptions = CURRENCIES.map((c) => ({ value: c, label: c }))
         />
       </div>
 
+      <div v-if="needsPremium" class="space-y-3 rounded-xl bg-accent/10 p-3" role="status">
+        <p class="flex items-center gap-1.5 text-sm font-medium">⭐ {{ $t('premium.budget_upsell') }}</p>
+        <template v-if="paymentPending">
+          <p class="text-sm">{{ $t('premium.pending') }}</p>
+          <button
+            type="button"
+            class="pressable w-full rounded-xl bg-accent py-3 font-semibold text-on-accent disabled:opacity-60"
+            :disabled="busy"
+            @click="retryAfterPayment"
+          >
+            {{ $t('premium.retry') }}
+          </button>
+        </template>
+        <PremiumOffer v-else compact @paid="onPaid" />
+        <p class="text-xs text-hint">{{ $t('premium.free_note') }}</p>
+      </div>
+
       <button
+        v-if="!needsPremium"
         type="submit"
         class="pressable w-full rounded-xl bg-accent py-3.5 font-semibold text-on-accent disabled:opacity-60"
         :disabled="busy"

@@ -3,6 +3,7 @@
 
 type ImpactStyle = 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'
 type NotificationType = 'error' | 'success' | 'warning'
+export type InvoiceStatus = 'paid' | 'cancelled' | 'failed' | 'pending'
 
 interface BottomButton {
   setText(text: string): BottomButton
@@ -36,6 +37,7 @@ interface WebApp {
   setHeaderColor?(color: string): void
   setBackgroundColor?(color: string): void
   showConfirm?(message: string, callback: (ok: boolean) => void): void
+  openInvoice?(url: string, callback: (status: InvoiceStatus) => void): void
   onEvent(event: 'themeChanged', cb: () => void): void
   BackButton: BackButtonApi
   MainButton: BottomButton
@@ -160,4 +162,13 @@ export function confirmDialog(message: string): Promise<boolean> {
     return new Promise((resolve) => show.call(webApp, message, resolve))
   }
   return Promise.resolve(window.confirm(message))
+}
+
+/** Telegram Stars payments need the in-app invoice sheet (Bot API 6.1+). */
+export const canPay = inTelegram && !!webApp?.openInvoice && webApp.isVersionAtLeast('6.1')
+
+export function openInvoice(url: string): Promise<InvoiceStatus> {
+  const open = webApp?.openInvoice
+  if (!canPay || !webApp || !open) return Promise.resolve('failed')
+  return new Promise((resolve) => open.call(webApp, url, resolve))
 }

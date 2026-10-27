@@ -4,17 +4,28 @@ import type {
   AccountCreate,
   AccountPatch,
   ApiErrorBody,
+  BillingPlans,
   Budget,
   BudgetCreate,
   BudgetList,
   Category,
+  Currency,
   Debt,
   DebtCreate,
   DebtDetail,
   DebtPatch,
   Installment,
   InstallmentCreate,
+  Invoice,
+  NewPlanItem,
+  PremiumPlan,
   PaymentInput,
+  PlanItemPatch,
+  PlanPatch,
+  PlanView,
+  Recurring,
+  RecurringCreate,
+  RecurringPatch,
   Summary,
   Transaction,
   TransactionFilter,
@@ -109,6 +120,26 @@ export const api = {
   restoreTransaction: (id: number) => request<Transaction>('POST', `/transactions/${id}/restore`),
 
   getSummary: (month?: string) => request<Summary>('GET', '/summary', { query: { month } }),
+
+  /** create=false only returns an existing plan (404 if none), for previews like Home. */
+  getPlan: (month?: string, currency?: Currency, create = true) =>
+    request<PlanView>('GET', '/plan', { query: { month, currency, create: create ? undefined : false } }),
+  patchPlan: (month: string, currency: Currency, patch: PlanPatch) =>
+    request<PlanView>('PATCH', '/plan', { query: { month, currency }, body: patch }),
+  addPlanItems: (month: string, currency: Currency, items: NewPlanItem[]) =>
+    request<PlanView>('POST', '/plan/items', { query: { month, currency }, body: { items } }),
+  parsePlan: async (text: string, currency: Currency) =>
+    (await request<{ items: NewPlanItem[] }>('POST', '/plan/parse', { query: { currency }, body: { text } })).items,
+  patchPlanItem: (id: number, patch: PlanItemPatch) => request<PlanView>('PATCH', `/plan/items/${id}`, { body: patch }),
+  deletePlanItem: (id: number) => request<PlanView>('DELETE', `/plan/items/${id}`),
+
+  listRecurring: async () => (await request<{ recurring: Recurring[] }>('GET', '/recurring')).recurring,
+  createRecurring: (input: RecurringCreate) => request<Recurring>('POST', '/recurring', { body: input }),
+  patchRecurring: (id: number, patch: RecurringPatch) => request<Recurring>('PATCH', `/recurring/${id}`, { body: patch }),
+  deleteRecurring: (id: number) => request<void>('DELETE', `/recurring/${id}`),
+
+  getBillingPlans: () => request<BillingPlans>('GET', '/billing/plans'),
+  createInvoice: (plan: PremiumPlan) => request<Invoice>('POST', '/billing/invoice', { body: { plan } }),
 
   listBudgets: (month?: string) => request<BudgetList>('GET', '/budgets', { query: { month } }),
   createBudget: (input: BudgetCreate) => request<Budget>('POST', '/budgets', { body: input }),

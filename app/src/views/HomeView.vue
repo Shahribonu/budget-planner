@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, type LocationQueryRaw } from 'vue-router'
+import { api } from '@/api/client'
 import type { Currency, Money, Transaction } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import BudgetBar from '@/components/BudgetBar.vue'
@@ -34,6 +35,7 @@ async function refresh() {
     // Only used to word debt rows in Recent; Home works without them.
     void plans.load().catch(() => {})
     void budgets.load(true).catch(() => {})
+    void loadPlanRow(ledger.summary?.month)
     failed.value = false
   } catch {
     failed.value = true
@@ -43,6 +45,20 @@ onMounted(refresh)
 watch(() => ledger.revision, refresh)
 
 const summary = computed(() => ledger.summary)
+
+// "Plan: N fit · M later" for this month, only when the plan has items.
+const planRow = ref<{ fit: number; later: number } | null>(null)
+async function loadPlanRow(month?: string) {
+  try {
+    // create=false: a preview must not create (and carry over into) this month's plan; 404 hides the row.
+    const v = await api.getPlan(month, undefined, false)
+    const planned = v.items.filter((i) => i.status === 'planned')
+    const fit = planned.filter((i) => i.decision?.group === 'fits').length
+    planRow.value = planned.length ? { fit, later: planned.length - fit } : null
+  } catch {
+    planRow.value = null
+  }
+}
 const range = computed(() => (summary.value ? monthRange(summary.value.month) : null))
 const isEmpty = computed(() => !!summary.value && summary.value.recent.length === 0)
 
@@ -209,6 +225,16 @@ function openTx(tx: Transaction) {
           </RouterLink>
         </div>
       </section>
+
+      <RouterLink
+        v-if="planRow"
+        :to="{ name: 'plan' }"
+        class="card pressable mb-3 flex items-center gap-3 px-4 py-3"
+      >
+        <span class="text-xl" aria-hidden="true">🗓️</span>
+        <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ $t('mplan.home_row', planRow) }}</span>
+        <AppIcon name="chevron" :size="16" class="shrink-0 text-hint" />
+      </RouterLink>
 
       <EmptyState
         v-if="isEmpty"
