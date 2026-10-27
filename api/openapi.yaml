@@ -68,6 +68,9 @@ paths:
                 type: { $ref: "#/components/schemas/AccountType" }
                 currency: { $ref: "#/components/schemas/Currency" }
                 opening_balance_minor: { type: integer, format: int64, default: 0 }
+                color: { type: string, pattern: "^#[0-9a-fA-F]{6}$" }
+                include_in_total: { type: boolean, default: true }
+                card_mask: { type: string, pattern: "^[0-9]{4}$" }
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
         "422": { $ref: "#/components/responses/Invalid" }

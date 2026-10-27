@@ -154,6 +154,9 @@ func TestAPIRejects(t *testing.T) {
 
 	c := newClient(t, srv, rand.Int64N(1<<50))
 	c.do("POST", "/api/accounts", map[string]any{"name": "X", "type": "bank", "currency": "UZS"}, 422)
+	if a := c.do("POST", "/api/accounts", map[string]any{"name": "Visa", "type": "visa", "currency": "USD", "color": "#FF6B5A", "card_mask": "1234", "include_in_total": false}, 201); a["color"] != "#FF6B5A" || a["card_mask"] != "1234" || a["include_in_total"] != false {
+		t.Errorf("styled create = %v", a)
+	}
 	c.do("POST", "/api/accounts", map[string]any{"name": "X", "type": "cash", "currency": "EUR"}, 422)
 	c.do("POST", "/api/accounts", map[string]any{"name": "X", "type": "cash", "currency": "UZS", "balance": 1}, 400)
 	c.do("POST", "/api/transactions", map[string]any{"type": "expense", "occurred_on": "26.10.2026"}, 400)

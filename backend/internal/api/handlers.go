@@ -144,18 +144,33 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name                string `json:"name"`
-		Type                string `json:"type"`
-		Currency            string `json:"currency"`
-		OpeningBalanceMinor int64  `json:"opening_balance_minor"`
+		Name                string  `json:"name"`
+		Type                string  `json:"type"`
+		Currency            string  `json:"currency"`
+		OpeningBalanceMinor int64   `json:"opening_balance_minor"`
+		Color               *string `json:"color"`
+		IncludeInTotal      *bool   `json:"include_in_total"`
+		CardMask            *string `json:"card_mask"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	a, err := s.ledger.CreateAccount(r.Context(), userID(r), ledger.NewAccount(in))
+	a, err := s.ledger.CreateAccount(r.Context(), userID(r), ledger.NewAccount{
+		Name: in.Name, Type: in.Type, Currency: in.Currency, OpeningBalanceMinor: in.OpeningBalanceMinor,
+	})
 	if err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	if in.Color != nil || in.IncludeInTotal != nil || in.CardMask != nil {
+		a, err = s.ledger.UpdateAccount(r.Context(), userID(r), a.ID, ledger.AccountPatch{
+			SetColor: in.Color != nil, Color: in.Color, IncludeInTotal: in.IncludeInTotal,
+			SetCardMask: in.CardMask != nil, CardMask: in.CardMask,
+		})
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, toAccountJSON(a))
 }
