@@ -13,7 +13,7 @@ import (
 const createLiabilityAccount = `-- name: CreateLiabilityAccount :one
 insert into accounts (user_id, kind, name, currency)
 values ($1, $2, $3, $4)
-returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at
+returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at
 `
 
 type CreateLiabilityAccountParams struct {
@@ -42,8 +42,27 @@ func (q *Queries) CreateLiabilityAccount(ctx context.Context, arg CreateLiabilit
 		&i.SystemKey,
 		&i.ArchivedAt,
 		&i.CreatedAt,
+		&i.CardMask,
+		&i.BankBalance,
+		&i.BankBalanceAt,
 	)
 	return i, err
+}
+
+const debtAccount = `-- name: DebtAccount :one
+select account_id from debts where id = $1 and user_id = $2 and deleted_at is null
+`
+
+type DebtAccountParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) DebtAccount(ctx context.Context, arg DebtAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, debtAccount, arg.ID, arg.UserID)
+	var account_id int64
+	err := row.Scan(&account_id)
+	return account_id, err
 }
 
 const getDebt = `-- name: GetDebt :one
@@ -252,23 +271,26 @@ func (q *Queries) InsertScheduleRow(ctx context.Context, arg InsertScheduleRowPa
 }
 
 const liabilityTotals = `-- name: LiabilityTotals :many
-select a.kind, p.currency, sum(p.amount)::bigint as amount
+select a.kind, (ip.id is not null)::bool as installment, p.currency, sum(p.amount)::bigint as amount
 from postings p
 join transactions t on t.id = p.transaction_id
 join accounts a on a.id = p.account_id
+left join installment_plans ip on ip.account_id = a.id
 where a.user_id = $1 and a.kind in ('receivable', 'payable') and t.deleted_at is null
-group by a.kind, p.currency
+group by a.kind, (ip.id is not null), p.currency
 having sum(p.amount) <> 0
-order by a.kind, p.currency
+order by 1, 2, 3
 `
 
 type LiabilityTotalsRow struct {
-	Kind     string
-	Currency string
-	Amount   int64
+	Kind        string
+	Installment bool
+	Currency    string
+	Amount      int64
 }
 
-// Receivable (owed to the user, positive) and payable (owed by the user, negative) per currency.
+// Receivable (owed to the user, positive) and payable (owed by the user, negative) per
+// currency, with installment plans apart from debts.
 func (q *Queries) LiabilityTotals(ctx context.Context, userID int64) ([]LiabilityTotalsRow, error) {
 	rows, err := q.db.Query(ctx, liabilityTotals, userID)
 	if err != nil {
@@ -278,7 +300,12 @@ func (q *Queries) LiabilityTotals(ctx context.Context, userID int64) ([]Liabilit
 	var items []LiabilityTotalsRow
 	for rows.Next() {
 		var i LiabilityTotalsRow
-		if err := rows.Scan(&i.Kind, &i.Currency, &i.Amount); err != nil {
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Installment,
+			&i.Currency,
+			&i.Amount,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -430,6 +457,22 @@ func (q *Queries) ListSchedule(ctx context.Context, planIds []int64) ([]Installm
 		return nil, err
 	}
 	return items, nil
+}
+
+const planAccount = `-- name: PlanAccount :one
+select account_id from installment_plans where id = $1 and user_id = $2 and deleted_at is null
+`
+
+type PlanAccountParams struct {
+	ID     int64
+	UserID int64
+}
+
+func (q *Queries) PlanAccount(ctx context.Context, arg PlanAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, planAccount, arg.ID, arg.UserID)
+	var account_id int64
+	err := row.Scan(&account_id)
+	return account_id, err
 }
 
 const renameAccount = `-- name: RenameAccount :exec

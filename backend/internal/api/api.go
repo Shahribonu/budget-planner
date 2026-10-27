@@ -20,6 +20,7 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/auth"
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
+	"github.com/Shahribonu/budget-planner/backend/internal/planning"
 )
 
 type Config struct {
@@ -36,11 +37,13 @@ type Server struct {
 	pool   *pgxpool.Pool
 	q      *dbq.Queries
 	ledger *ledger.Service
+	plan   *planning.Service
 	now    func() time.Time
 }
 
 func New(cfg Config, pool *pgxpool.Pool) http.Handler {
-	s := &Server{cfg: cfg, pool: pool, q: dbq.New(pool), ledger: ledger.New(pool), now: time.Now}
+	l := ledger.New(pool)
+	s := &Server{cfg: cfg, pool: pool, q: dbq.New(pool), ledger: l, plan: planning.NewService(pool, l), now: time.Now}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, requestLog, middleware.Recoverer)
@@ -79,6 +82,16 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 		r.Post("/budgets", s.createBudget)
 		r.Patch("/budgets/{id}", s.patchBudget)
 		r.Delete("/budgets/{id}", s.deleteBudget)
+		r.Get("/plan", s.getPlanView)
+		r.Patch("/plan", s.patchPlanView)
+		r.Post("/plan/items", s.addPlanItems)
+		r.Post("/plan/parse", s.parsePlanText)
+		r.Patch("/plan/items/{id}", s.patchPlanItem)
+		r.Delete("/plan/items/{id}", s.deletePlanItem)
+		r.Get("/recurring", s.listRecurring)
+		r.Post("/recurring", s.createRecurring)
+		r.Patch("/recurring/{id}", s.patchRecurring)
+		r.Delete("/recurring/{id}", s.deleteRecurring)
 	})
 	return r
 }

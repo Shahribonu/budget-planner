@@ -10,7 +10,7 @@ import (
 )
 
 const getUser = `-- name: GetUser :one
-select id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on from users where id = $1
+select id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month from users where id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
@@ -29,6 +29,9 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.NotifyEnabled,
 		&i.NotifyTime,
 		&i.LastSummaryOn,
+		&i.ChatMode,
+		&i.ChatModeUntil,
+		&i.PlanPromptedMonth,
 	)
 	return i, err
 }
@@ -39,7 +42,7 @@ set language      = coalesce($1, language),
     main_currency = coalesce($2, main_currency),
     timezone      = coalesce($3, timezone)
 where id = $4
-returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on
+returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month
 `
 
 type UpdateUserSettingsParams struct {
@@ -70,6 +73,9 @@ func (q *Queries) UpdateUserSettings(ctx context.Context, arg UpdateUserSettings
 		&i.NotifyEnabled,
 		&i.NotifyTime,
 		&i.LastSummaryOn,
+		&i.ChatMode,
+		&i.ChatModeUntil,
+		&i.PlanPromptedMonth,
 	)
 	return i, err
 }
@@ -80,7 +86,7 @@ values ($1, $2, $3, $4)
 on conflict (telegram_id) do update
     set first_name = excluded.first_name,
         username   = excluded.username
-returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on
+returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month
 `
 
 type UpsertUserParams struct {
@@ -111,6 +117,9 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.NotifyEnabled,
 		&i.NotifyTime,
 		&i.LastSummaryOn,
+		&i.ChatMode,
+		&i.ChatModeUntil,
+		&i.PlanPromptedMonth,
 	)
 	return i, err
 }

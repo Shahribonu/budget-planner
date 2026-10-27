@@ -4,7 +4,17 @@ import type {
   AccountCreate,
   AccountPatch,
   ApiErrorBody,
+  Budget,
+  BudgetCreate,
+  BudgetList,
   Category,
+  Debt,
+  DebtCreate,
+  DebtDetail,
+  DebtPatch,
+  Installment,
+  InstallmentCreate,
+  PaymentInput,
   Summary,
   Transaction,
   TransactionFilter,
@@ -34,12 +44,12 @@ function authHeader(): string | undefined {
   return undefined
 }
 
-type Query = Record<string, string | number | boolean | undefined | null>
+type Query = Record<string, string | number | boolean | string[] | undefined | null>
 
 function buildUrl(path: string, query?: Query): string {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(query ?? {})) {
-    if (v !== undefined && v !== null && v !== '') params.set(k, String(v))
+    if (v !== undefined && v !== null && v !== '') params.set(k, Array.isArray(v) ? v.join(',') : String(v))
   }
   const qs = params.toString()
   return `/api${path}${qs ? `?${qs}` : ''}`
@@ -99,4 +109,25 @@ export const api = {
   restoreTransaction: (id: number) => request<Transaction>('POST', `/transactions/${id}/restore`),
 
   getSummary: (month?: string) => request<Summary>('GET', '/summary', { query: { month } }),
+
+  listBudgets: (month?: string) => request<BudgetList>('GET', '/budgets', { query: { month } }),
+  createBudget: (input: BudgetCreate) => request<Budget>('POST', '/budgets', { body: input }),
+  patchBudget: (id: number, amountMinor: number) =>
+    request<Budget>('PATCH', `/budgets/${id}`, { body: { amount_minor: amountMinor } }),
+  deleteBudget: (id: number) => request<void>('DELETE', `/budgets/${id}`),
+
+  listDebts: async () => (await request<{ debts: Debt[] }>('GET', '/debts')).debts,
+  getDebt: (id: number) => request<DebtDetail>('GET', `/debts/${id}`),
+  createDebt: (input: DebtCreate) => request<Debt>('POST', '/debts', { body: input }),
+  patchDebt: (id: number, patch: DebtPatch) => request<Debt>('PATCH', `/debts/${id}`, { body: patch }),
+  deleteDebt: (id: number) => request<void>('DELETE', `/debts/${id}`),
+  payDebt: (id: number, input: PaymentInput) => request<Transaction>('POST', `/debts/${id}/payments`, { body: input }),
+
+  listInstallments: async () =>
+    (await request<{ installments: Installment[] }>('GET', '/installments')).installments,
+  getInstallment: (id: number) => request<Installment>('GET', `/installments/${id}`),
+  createInstallment: (input: InstallmentCreate) => request<Installment>('POST', '/installments', { body: input }),
+  deleteInstallment: (id: number) => request<void>('DELETE', `/installments/${id}`),
+  payInstallment: (id: number, input: PaymentInput) =>
+    request<Transaction>('POST', `/installments/${id}/payments`, { body: input }),
 }

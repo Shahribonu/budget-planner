@@ -38,6 +38,9 @@ const (
 	AskAccount
 	AskDuplicate
 	Merged // the user said a possible duplicate was the same expense
+	AskCard
+	AskBankKind
+	AskTransferFrom
 )
 
 type stage int
@@ -63,6 +66,7 @@ type Item struct {
 	Pattern        string      `json:"pattern"`
 	SourceRef      string      `json:"source_ref"`
 	NeedsReview    bool        `json:"needs_review"`
+	Bank           *BankInfo   `json:"bank,omitempty"` // set for forwarded bank notifications
 }
 
 type Outcome struct {
@@ -74,6 +78,10 @@ type Outcome struct {
 	Duplicate  dbq.FindPossibleDuplicateRow
 	NewAccount string // an account was created for this item
 	FirstLog   bool   // the user's first saved transaction ever
+	// Bank notifications: the card's balance as the bank reported it and in the app,
+	// set when they differ and this notification is the newest for the card.
+	BankBalance *int64
+	AppBalance  int64
 }
 
 type Service struct {
@@ -408,7 +416,16 @@ func (s *Service) AnswerDuplicate(ctx context.Context, u dbq.User, draftID int64
 		return Outcome{}, err
 	}
 	if !keep {
+		if item.Bank != nil && item.Bank.DuplicateOf != 0 {
+			// The bank message confirms an expense logged by hand: keep that one, on the card.
+			if _, err := s.ChangeAccount(ctx, u, item.Bank.DuplicateOf, item.AccountID); err != nil {
+				return Outcome{}, err
+			}
+		}
 		return Outcome{Kind: Merged, Item: item}, nil
+	}
+	if item.Bank != nil {
+		return s.advanceBank(ctx, u, item, bankCommit)
 	}
 	return s.commit(ctx, u, Outcome{Item: item}, source)
 }

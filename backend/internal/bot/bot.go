@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
+	"github.com/Shahribonu/budget-planner/backend/internal/capture/bank"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/i18n"
@@ -244,6 +245,16 @@ func (b *Bot) settingsKeyboard(u dbq.User) *telegram.InlineKeyboardMarkup {
 // ---- logging ----
 
 func (b *Bot) text(ctx context.Context, u dbq.User, m *telegram.Message, text, source, transcript string) {
+	if n, ok := bank.Parse(text); ok && source == "chat" {
+		o, err := b.capture.CaptureBank(ctx, u, n)
+		if err != nil {
+			b.fail(ctx, m.Chat.ID, u, err)
+			return
+		}
+		msg, kb := b.render(ctx, u, o)
+		b.send(ctx, m.Chat.ID, msg, kb, m.MessageID)
+		return
+	}
 	ref := fmt.Sprintf("tg:%d:%d", m.Chat.ID, m.MessageID)
 	outs, err := b.capture.Capture(ctx, u, text, source, ref)
 	if err != nil {
@@ -385,6 +396,23 @@ func (b *Bot) callback(ctx context.Context, u dbq.User, cq *telegram.CallbackQue
 		showOutcome(b.capture.AnswerAccount(ctx, u, arg(1), arg(2)))
 	case "dd":
 		showOutcome(b.capture.AnswerDuplicate(ctx, u, arg(1), arg(2) == 1))
+	case "bc": // which account is this card
+		showOutcome(b.capture.AnswerCard(ctx, u, arg(1), arg(2)))
+	case "bk": // what bank money in/out was
+		choice := ""
+		if len(parts) > 2 {
+			choice = parts[2]
+		}
+		showOutcome(b.capture.AnswerBankKind(ctx, u, arg(1), choice))
+	case "bf": // the other account of an own transfer (0: not in the app)
+		showOutcome(b.capture.AnswerTransferFrom(ctx, u, arg(1), arg(2)))
+	case "rc": // reconcile an account to the bank's balance
+		bal, cur, err := b.capture.ReconcileToBank(ctx, u, arg(1))
+		if err != nil {
+			toast = i18n.T(u.Language, "error")
+			return
+		}
+		toast = i18n.T(u.Language, "reconciled", i18n.Money(u.Language, bal, cur))
 	case "dx":
 		question := ""
 		if len(parts) > 2 {

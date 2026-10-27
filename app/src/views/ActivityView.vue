@@ -14,12 +14,24 @@ import { useFormat } from '@/composables/useFormat'
 import { categoryLabel } from '@/i18n'
 import { ACCOUNT_ICONS } from '@/lib/accounts'
 import { formatDay } from '@/lib/dates'
+import { txRoute } from '@/lib/transactions'
 import { useAccountsStore } from '@/stores/accounts'
 import { useCategoriesStore } from '@/stores/categories'
+import { useInstallmentsStore } from '@/stores/installments'
 import { useLedgerStore } from '@/stores/ledger'
 
 const PAGE_SIZE = 50
-const TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'exchange', 'opening']
+const TYPES: TransactionType[] = [
+  'expense',
+  'income',
+  'transfer',
+  'exchange',
+  'debt',
+  'debt_payment',
+  'installment',
+  'installment_payment',
+  'opening',
+]
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 const route = useRoute()
@@ -27,6 +39,7 @@ const router = useRouter()
 const accounts = useAccountsStore()
 const categories = useCategoriesStore()
 const ledger = useLedgerStore()
+const plans = useInstallmentsStore()
 const { dayLabel, lang } = useFormat()
 const { t } = useI18n()
 
@@ -42,7 +55,8 @@ function int(v: LocationQuery[string] | undefined): number | undefined {
 
 const filter = computed<TransactionFilter>(() => {
   const q = route.query
-  const type = str(q.type) as TransactionType | undefined
+  // One type, or several comma-separated (the overall budget drills into expense,installment).
+  const types = (str(q.type) ?? '').split(',').filter((x): x is TransactionType => TYPES.includes(x as TransactionType))
   const currency = str(q.currency) as Currency | undefined
   const from = str(q.from)
   const to = str(q.to)
@@ -50,7 +64,7 @@ const filter = computed<TransactionFilter>(() => {
     q: str(q.q)?.trim() || undefined,
     account_id: int(q.account_id),
     category_id: int(q.category_id),
-    type: type && TYPES.includes(type) ? type : undefined,
+    type: types.length > 1 ? types : types[0],
     currency: currency && CURRENCIES.includes(currency) ? currency : undefined,
     from: from && DATE_RE.test(from) ? from : undefined,
     to: to && DATE_RE.test(to) ? to : undefined,
@@ -128,7 +142,8 @@ const sentinel = ref<HTMLElement>()
 let observer: IntersectionObserver | undefined
 
 onMounted(() => {
-  void Promise.all([accounts.load(), categories.load()]).catch(() => {})
+  // Plans only name their payment rows, so failures are ignored.
+  void Promise.all([accounts.load(), categories.load(), plans.load()]).catch(() => {})
   reload()
   observer = new IntersectionObserver(
     (entries) => {
@@ -177,6 +192,10 @@ const TYPE_ICONS: Record<TransactionType, string> = {
   transfer: '🔁',
   exchange: '💱',
   opening: '🏁',
+  debt: '🤝',
+  debt_payment: '↩️',
+  installment: '🛍️',
+  installment_payment: '🗓️',
 }
 
 const sheet = ref<FilterKey | null>(null)
@@ -184,7 +203,8 @@ const sheet = ref<FilterKey | null>(null)
 /** Query value of a filter as a string (option values are strings), or null when unset. */
 function filterValue(key: FilterKey): string | null {
   const v = filter.value[key]
-  return v === undefined ? null : String(v)
+  if (v === undefined) return null
+  return Array.isArray(v) ? v.join(',') : String(v)
 }
 
 const FILTERS = computed<{ key: FilterKey; title: string; options: SheetOption<string>[] }[]>(() => [
@@ -227,13 +247,14 @@ const FILTERS = computed<{ key: FilterKey; title: string; options: SheetOption<s
 function chipValue(key: FilterKey): string {
   const v = filterValue(key)
   if (v === null) return t('activity.all')
+  if (key === 'type' && v.includes(',')) return v.split(',').map((x) => t(`types.${x}`)).join(', ')
   const opt = FILTERS.value.find((f) => f.key === key)?.options.find((o) => o.value === v)
   if (!opt) return '…' // accounts/categories still loading
   return key === 'category_id' && opt.icon ? `${opt.icon} ${opt.label}` : opt.label
 }
 
-function openTx(id: number) {
-  void router.push({ name: 'tx-edit', params: { id } })
+function openTx(tx: Transaction) {
+  void router.push(txRoute(tx))
 }
 </script>
 

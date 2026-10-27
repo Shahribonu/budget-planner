@@ -248,6 +248,8 @@ type transactionJSON struct {
 	CreatedAt     time.Time   `json:"created_at"`
 	DebtID        *int64      `json:"debt_id"`
 	InstallmentID *int64      `json:"installment_id"`
+	DebtDirection *string     `json:"debt_direction"`
+	Counterparty  *string     `json:"counterparty"`
 }
 
 func toTransactionJSON(t ledger.Transaction) transactionJSON {
@@ -258,6 +260,7 @@ func toTransactionJSON(t ledger.Transaction) transactionJSON {
 	return transactionJSON{
 		t.ID, t.Type, date{t.OccurredOn}, t.AmountMinor, t.Currency, account, t.ToAccountID,
 		t.ToAmountMinor, t.ToCurrency, t.CategoryID, t.Description, t.Source, t.CreatedAt, t.DebtID, t.PlanID,
+		t.DebtDirection, t.Counterparty,
 	}
 }
 
@@ -305,6 +308,7 @@ func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	f.From, f.To = parseDate("from"), parseDate("to")
 	f.AccountID, f.CategoryID = parseID("account_id"), parseID("category_id")
+	f.DebtID, f.PlanID = parseID("debt_id"), parseID("installment_id")
 	f.Type, f.Currency, f.Q = str("type"), str("currency"), str("q")
 	if v := q.Get("limit"); v != "" {
 		f.Limit, _ = strconv.Atoi(v)
@@ -433,13 +437,14 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		cats[i] = catJSON(c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"month":       sum.Month,
-		"balances":    toMoneyJSON(sum.Balances),
-		"income":      toMoneyJSON(sum.Income),
-		"expense":     toMoneyJSON(sum.Expense),
-		"by_category": cats,
-		"recent":      toTransactionsJSON(sum.Recent),
-		"owed_to_me":  toMoneyJSON(sum.OwedToMe),
-		"i_owe":       toMoneyJSON(sum.IOwe),
+		"month":        sum.Month,
+		"balances":     toMoneyJSON(sum.Balances),
+		"income":       toMoneyJSON(sum.Income),
+		"expense":      toMoneyJSON(sum.Expense),
+		"by_category":  cats,
+		"recent":       toTransactionsJSON(sum.Recent),
+		"owed_to_me":   toMoneyJSON(sum.OwedToMe),
+		"i_owe":        toMoneyJSON(sum.IOwe),
+		"installments": toMoneyJSON(sum.Installments),
 	})
 }

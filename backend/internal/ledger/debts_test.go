@@ -153,10 +153,18 @@ func TestInstallmentPlan(t *testing.T) {
 	f := setup(t)
 	humo := f.account("Humo", "humo", "UZS", 10_000_000*sum)
 	first := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	jan := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	janSummary := func() ledger.Summary {
+		s, err := f.svc.Summary(ctx, f.user, "2026-01")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
 	p, err := f.svc.CreatePlan(ctx, f.user, ledger.NewPlan{
 		Title: "iPhone", Provider: "Alif", CategoryID: f.cats["home"], Currency: "UZS",
 		TotalMinor: 10_000_000 * sum, Months: 3, FirstDueOn: first, PayFromAccountID: &humo,
-		OccurredOn: today(), RecordPurchase: true,
+		OccurredOn: jan, RecordPurchase: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -170,8 +178,8 @@ func TestInstallmentPlan(t *testing.T) {
 		}
 	}
 	// The purchase is this month's spending, once.
-	s := f.summary()
-	if total(s.Expense, "UZS") != 10_000_000*sum || total(s.IOwe, "UZS") != 10_000_000*sum {
+	s := janSummary()
+	if total(s.Expense, "UZS") != 10_000_000*sum || total(s.Installments, "UZS") != 10_000_000*sum {
 		t.Errorf("after purchase: expense %+v, owe %+v", s.Expense, s.IOwe)
 	}
 	if f.balances()[humo] != 10_000_000*sum {
@@ -194,11 +202,11 @@ func TestInstallmentPlan(t *testing.T) {
 	if !p.Schedule[0].Paid || p.Schedule[1].Paid || p.Next == nil || p.Next.N != 2 || p.Next.Amount != 2_333_333*sum {
 		t.Errorf("after partial: schedule %+v next %+v", p.Schedule, p.Next)
 	}
-	s = f.summary()
+	s = janSummary()
 	if total(s.Expense, "UZS") != 10_000_000*sum {
 		t.Errorf("payments counted as spending again: %+v", s.Expense)
 	}
-	if total(s.IOwe, "UZS") != p.Remaining || p.Remaining != (10_000_000-3_333_333-1_000_000)*sum {
+	if total(s.Installments, "UZS") != p.Remaining || p.Remaining != (10_000_000-3_333_333-1_000_000)*sum {
 		t.Errorf("remaining %d, owe %+v", p.Remaining/sum, s.IOwe)
 	}
 	if _, err := f.svc.PayInstallment(ctx, f.user, p.ID, p.Remaining+1, humo, today()); !isValidation(err, "overpayment") {
@@ -218,7 +226,7 @@ func TestInstallmentPlan(t *testing.T) {
 	if err := f.svc.DeletePlan(ctx, f.user, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if f.balances()[humo] != 10_000_000*sum || total(f.summary().Expense, "UZS") != 0 {
+	if f.balances()[humo] != 10_000_000*sum || total(janSummary().Expense, "UZS") != 0 {
 		t.Error("deleting the plan did not remove its transactions")
 	}
 }
@@ -233,7 +241,7 @@ func TestPlanStartedBeforeTracking(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := f.summary()
-	if total(s.Expense, "UZS") != 0 || total(s.IOwe, "UZS") != 6_000_000*sum || p.Next.Amount != 1_000_000*sum {
-		t.Errorf("expense %+v, owe %+v, next %+v", s.Expense, s.IOwe, p.Next)
+	if total(s.Expense, "UZS") != 0 || total(s.Installments, "UZS") != 6_000_000*sum || len(s.IOwe) != 0 || p.Next.Amount != 1_000_000*sum {
+		t.Errorf("expense %+v, installments %+v, owe %+v, next %+v", s.Expense, s.Installments, s.IOwe, p.Next)
 	}
 }

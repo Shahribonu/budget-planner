@@ -64,7 +64,18 @@ func (s *Server) patchBudget(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	bs, _, _, err := s.ledger.Budgets(r.Context(), userID(r), "")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	for _, b := range bs {
+		if b.ID == id {
+			writeJSON(w, http.StatusOK, toBudgetJSON(b))
+			return
+		}
+	}
+	s.fail(w, r, ledger.ErrNotFound)
 }
 
 func (s *Server) deleteBudget(w http.ResponseWriter, r *http.Request) {

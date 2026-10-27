@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, type LocationQueryRaw } from 'vue-router'
-import type { Currency, Money } from '@/api/types'
+import type { Currency, Money, Transaction } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
+import BudgetBar from '@/components/BudgetBar.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import TxRow from '@/components/TxRow.vue'
 import { useFormat } from '@/composables/useFormat'
 import { categoryLabel } from '@/i18n'
 import { formatMonth, monthRange } from '@/lib/dates'
+import { txRoute } from '@/lib/transactions'
 import { useAccountsStore } from '@/stores/accounts'
+import { useBudgetsStore } from '@/stores/budgets'
 import { useCategoriesStore } from '@/stores/categories'
+import { useInstallmentsStore } from '@/stores/installments'
 import { useLedgerStore } from '@/stores/ledger'
 import { useUserStore } from '@/stores/user'
 
@@ -18,6 +22,8 @@ const user = useUserStore()
 const ledger = useLedgerStore()
 const accounts = useAccountsStore()
 const categories = useCategoriesStore()
+const budgets = useBudgetsStore()
+const plans = useInstallmentsStore()
 const { money, lang } = useFormat()
 
 const failed = ref(false)
@@ -25,6 +31,9 @@ const failed = ref(false)
 async function refresh() {
   try {
     await Promise.all([ledger.loadSummary(), categories.load(), accounts.load()])
+    // Only used to word debt rows in Recent; Home works without them.
+    void plans.load().catch(() => {})
+    void budgets.load(true).catch(() => {})
     failed.value = false
   } catch {
     failed.value = true
@@ -36,6 +45,16 @@ watch(() => ledger.revision, refresh)
 const summary = computed(() => ledger.summary)
 const range = computed(() => (summary.value ? monthRange(summary.value.month) : null))
 const isEmpty = computed(() => !!summary.value && summary.value.recent.length === 0)
+
+const debtTiles = computed(() => {
+  const s = summary.value
+  if (!s) return []
+  return [
+    { key: 'owed_to_me', list: s.owed_to_me ?? [], to: { name: 'debts' }, icon: 'in' as const },
+    { key: 'i_owe', list: s.i_owe ?? [], to: { name: 'debts' }, icon: 'out' as const },
+    { key: 'installments', list: s.installments ?? [], to: { name: 'installments' }, icon: 'calendar' as const },
+  ].filter((tile) => tile.list.some((m) => m.amount_minor !== 0))
+})
 
 const balances = computed<Money[]>(() => {
   const list = summary.value?.balances ?? []
@@ -84,8 +103,8 @@ function drill(query: LocationQueryRaw, withMonth = true) {
   void router.push({ name: 'activity', query: q })
 }
 
-function openTx(id: number) {
-  void router.push({ name: 'tx-edit', params: { id } })
+function openTx(tx: Transaction) {
+  void router.push(txRoute(tx))
 }
 </script>
 
@@ -106,6 +125,32 @@ function openTx(id: number) {
         >
           {{ money(b.amount_minor, b.currency) }}
         </button>
+      </section>
+
+      <!-- Debts: only when something is open -->
+      <section v-if="debtTiles.length" class="mb-3 divide-y divide-separator rounded-2xl bg-surface">
+        <RouterLink
+          v-for="tile in debtTiles"
+          :key="tile.key"
+          :to="tile.to"
+          class="flex items-start justify-between gap-3 px-4 py-3 active:bg-page/60"
+        >
+          <span class="flex shrink-0 items-center gap-1 pt-0.5 text-sm text-hint">
+            <AppIcon :name="tile.icon" :size="14" />{{ $t(`home.${tile.key}`) }}
+          </span>
+          <span class="flex min-w-0 items-center gap-1">
+            <span class="min-w-0 text-right">
+              <span
+                v-for="m in tile.list.filter((x) => x.amount_minor !== 0)"
+                :key="m.currency"
+                class="tabular block truncate font-semibold"
+              >
+                {{ money(m.amount_minor, m.currency) }}
+              </span>
+            </span>
+            <AppIcon name="chevron" :size="16" class="shrink-0 text-hint" />
+          </span>
+        </RouterLink>
       </section>
 
       <!-- This month: income / expense per currency -->
@@ -146,6 +191,22 @@ function openTx(id: number) {
               </button>
             </div>
           </div>
+          <!-- Overall budget, compact; full card is on Plan -->
+          <RouterLink
+            v-for="b in budgets.overall"
+            :key="b.id"
+            :to="{ name: 'plan' }"
+            class="block"
+            :aria-label="`${$t('budgets.overall')} ${b.currency}`"
+          >
+            <span class="mb-1 flex justify-between gap-2 text-xs text-hint">
+              <span class="truncate">{{ $t('budgets.overall') }}</span>
+              <span class="tabular shrink-0">
+                {{ $t('budgets.spent_of', { spent: money(b.spent_minor, b.currency, { bare: true }), limit: money(b.amount_minor, b.currency) }) }}
+              </span>
+            </span>
+            <BudgetBar :spent="b.spent_minor" :limit="b.amount_minor" />
+          </RouterLink>
         </div>
       </section>
 

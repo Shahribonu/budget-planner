@@ -27,7 +27,7 @@ func (q *Queries) AccountBalance(ctx context.Context, accountID int64) (int64, e
 const createAssetAccount = `-- name: CreateAssetAccount :one
 insert into accounts (user_id, kind, type, name, currency)
 values ($1, 'asset', $2, $3, $4)
-returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at
+returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at
 `
 
 type CreateAssetAccountParams struct {
@@ -56,6 +56,9 @@ func (q *Queries) CreateAssetAccount(ctx context.Context, arg CreateAssetAccount
 		&i.SystemKey,
 		&i.ArchivedAt,
 		&i.CreatedAt,
+		&i.CardMask,
+		&i.BankBalance,
+		&i.BankBalanceAt,
 	)
 	return i, err
 }
@@ -88,7 +91,7 @@ func (q *Queries) EnsureSystemAccount(ctx context.Context, arg EnsureSystemAccou
 }
 
 const getAssetAccount = `-- name: GetAssetAccount :one
-select id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at from accounts where id = $1 and user_id = $2 and kind = 'asset'
+select id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at from accounts where id = $1 and user_id = $2 and kind = 'asset'
 `
 
 type GetAssetAccountParams struct {
@@ -110,6 +113,9 @@ func (q *Queries) GetAssetAccount(ctx context.Context, arg GetAssetAccountParams
 		&i.SystemKey,
 		&i.ArchivedAt,
 		&i.CreatedAt,
+		&i.CardMask,
+		&i.BankBalance,
+		&i.BankBalanceAt,
 	)
 	return i, err
 }
@@ -176,7 +182,7 @@ set name        = coalesce($1, name),
         else null
     end
 where id = $3 and user_id = $4 and kind = 'asset'
-returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at
+returning id, user_id, household_id, kind, type, name, currency, system_key, archived_at, created_at, card_mask, bank_balance, bank_balance_at
 `
 
 type UpdateAssetAccountParams struct {
@@ -205,6 +211,9 @@ func (q *Queries) UpdateAssetAccount(ctx context.Context, arg UpdateAssetAccount
 		&i.SystemKey,
 		&i.ArchivedAt,
 		&i.CreatedAt,
+		&i.CardMask,
+		&i.BankBalance,
+		&i.BankBalanceAt,
 	)
 	return i, err
 }

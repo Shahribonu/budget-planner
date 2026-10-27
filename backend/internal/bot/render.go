@@ -25,7 +25,40 @@ func (b *Bot) render(ctx context.Context, u dbq.User, o capture.Outcome) (string
 	switch o.Kind {
 	case capture.Saved:
 		text := b.card(ctx, u, o.Tx, o.NewAccount)
-		return text, b.cardKeyboard(u, o.Tx)
+		kbd := b.cardKeyboard(u, o.Tx)
+		if o.BankBalance != nil {
+			text += "\n" + i18n.T(lang, "bank.mismatch", i18n.Money(lang, *o.BankBalance, it.Currency), i18n.Money(lang, o.AppBalance, it.Currency))
+			kbd.InlineKeyboard = append(kbd.InlineKeyboard, []btn{{Text: i18n.T(lang, "btn.reconcile"), CallbackData: fmt.Sprintf("rc:%d", it.AccountID)}})
+		}
+		return text, kbd
+
+	case capture.AskCard:
+		rows := accountRows(lang, o.Accounts, func(id int64) string { return fmt.Sprintf("bc:%d:%d", o.DraftID, id) })
+		rows = append(rows, []btn{{Text: i18n.T(lang, "btn.new_card", it.Bank.CardMask), CallbackData: fmt.Sprintf("bc:%d:0", o.DraftID)}})
+		rows = append(rows, []btn{{Text: i18n.T(lang, "btn.cancel"), CallbackData: fmt.Sprintf("dx:%d:card", o.DraftID)}})
+		return i18n.T(lang, "ask.card", it.Bank.CardMask), &kb{InlineKeyboard: rows}
+
+	case capture.AskBankKind:
+		amount := "<b>" + i18n.Money(lang, it.AmountMinor, it.Currency) + "</b>"
+		if it.Bank.Direction == "credit" {
+			return i18n.T(lang, "ask.bank_in", amount, label), &kb{InlineKeyboard: [][]btn{
+				{{Text: i18n.T(lang, "btn.income"), CallbackData: fmt.Sprintf("bk:%d:income", o.DraftID)}, {Text: i18n.T(lang, "btn.own_in"), CallbackData: fmt.Sprintf("bk:%d:own", o.DraftID)}},
+				{{Text: i18n.T(lang, "btn.cancel"), CallbackData: fmt.Sprintf("dx:%d:bank_kind", o.DraftID)}},
+			}}
+		}
+		return i18n.T(lang, "ask.bank_out", amount, label), &kb{InlineKeyboard: [][]btn{
+			{{Text: i18n.T(lang, "btn.expense"), CallbackData: fmt.Sprintf("bk:%d:expense", o.DraftID)}, {Text: i18n.T(lang, "btn.own_out"), CallbackData: fmt.Sprintf("bk:%d:own", o.DraftID)}},
+			{{Text: i18n.T(lang, "btn.cancel"), CallbackData: fmt.Sprintf("dx:%d:bank_kind", o.DraftID)}},
+		}}
+
+	case capture.AskTransferFrom:
+		q := "ask.from"
+		if it.Bank.Direction == "debit" {
+			q = "ask.to"
+		}
+		rows := accountRows(lang, o.Accounts, func(id int64) string { return fmt.Sprintf("bf:%d:%d", o.DraftID, id) })
+		rows = append(rows, []btn{{Text: i18n.T(lang, "btn.untracked"), CallbackData: fmt.Sprintf("bf:%d:0", o.DraftID)}})
+		return i18n.T(lang, q), &kb{InlineKeyboard: rows}
 
 	case capture.AskAmount:
 		as := i18n.Money(lang, it.AmountMinor, it.Currency)

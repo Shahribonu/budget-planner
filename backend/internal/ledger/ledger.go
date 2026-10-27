@@ -207,8 +207,10 @@ type Transaction struct {
 	Description   string
 	Source        string
 	CreatedAt     time.Time
-	DebtID        *int64 // debt and debt_payment
-	PlanID        *int64 // installment and installment_payment
+	DebtID        *int64  // debt and debt_payment
+	PlanID        *int64  // installment and installment_payment
+	DebtDirection *string // lent or borrowed, for debt and debt_payment
+	Counterparty  *string // the person, for debt and debt_payment
 }
 
 // Record writes a new transaction. If in.SourceRef was already recorded for this source,
@@ -329,6 +331,18 @@ func (s *Service) setDeleted(ctx context.Context, userID, id int64, deleted bool
 		}
 		if _, err := q.SetTransactionDeleted(ctx, dbq.SetTransactionDeletedParams{Deleted: deleted, ID: id, UserID: userID}); err != nil {
 			return err
+		}
+		if !deleted {
+			// Restoring a repayment must not pay back more than was owed.
+			bals, err := q.LiabilityBalancesOfTransaction(ctx, id)
+			if err != nil {
+				return err
+			}
+			for _, b := range bals {
+				if (b.Kind == "receivable" && b.Balance < 0) || (b.Kind == "payable" && b.Balance > 0) {
+					return invalid("overpayment", "amount_minor", "restoring this would pay back more than is owed")
+				}
+			}
 		}
 		action := "delete"
 		if !deleted {
@@ -493,6 +507,10 @@ func loadMany(ctx context.Context, q *dbq.Queries, rows []dbq.Transaction) ([]Tr
 			// Debts and installments: amount is the change in what is owed; the asset
 			// leg, when there is one, is the account money moved through.
 			t.DebtID, t.PlanID = l.DebtID, l.PlanID
+			if l.DebtID != nil {
+				name := l.AccountName
+				t.DebtDirection, t.Counterparty = l.DebtDirection, &name
+			}
 			t.AmountMinor, t.Currency = abs(l.Amount), l.Currency
 			if len(assets) == 1 {
 				t.AccountID = assets[0].AccountID

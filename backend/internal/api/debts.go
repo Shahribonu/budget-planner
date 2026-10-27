@@ -20,6 +20,8 @@ type debtJSON struct {
 	Note           string    `json:"note"`
 	Closed         bool      `json:"closed"`
 	CreatedAt      time.Time `json:"created_at"`
+	OccurredOn     date      `json:"occurred_on"`
+	AccountID      *int64    `json:"account_id"`
 }
 
 func optDate(t *time.Time) *date {
@@ -30,7 +32,7 @@ func optDate(t *time.Time) *date {
 }
 
 func toDebtJSON(d ledger.Debt) debtJSON {
-	return debtJSON{d.ID, d.Direction, d.Counterparty, d.Currency, d.Principal, d.Remaining, optDate(d.DueOn), d.Note, d.Remaining == 0, d.CreatedAt}
+	return debtJSON{d.ID, d.Direction, d.Counterparty, d.Currency, d.Principal, d.Remaining, optDate(d.DueOn), d.Note, d.Remaining == 0, d.CreatedAt, date{d.OccurredOn}, d.AccountID}
 }
 
 func (s *Server) listDebts(w http.ResponseWriter, r *http.Request) {

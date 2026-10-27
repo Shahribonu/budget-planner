@@ -49,6 +49,12 @@ returning *;
 -- name: InsertScheduleRow :exec
 insert into installment_schedule (plan_id, n, due_on, amount) values (@plan_id, @n, @due_on, @amount);
 
+-- name: DebtAccount :one
+select account_id from debts where id = @id and user_id = @user_id and deleted_at is null;
+
+-- name: PlanAccount :one
+select account_id from installment_plans where id = @id and user_id = @user_id and deleted_at is null;
+
 -- name: ListPlans :many
 -- paid: total minus what is still owed (the payable balance is negative while owed).
 select ip.*, (ip.total + coalesce((select sum(p.amount) from postings p join transactions t on t.id = p.transaction_id
@@ -70,12 +76,14 @@ select * from installment_schedule where plan_id = any(@plan_ids::bigint[]) orde
 update installment_plans set deleted_at = now() where id = @id and user_id = @user_id;
 
 -- name: LiabilityTotals :many
--- Receivable (owed to the user, positive) and payable (owed by the user, negative) per currency.
-select a.kind, p.currency, sum(p.amount)::bigint as amount
+-- Receivable (owed to the user, positive) and payable (owed by the user, negative) per
+-- currency, with installment plans apart from debts.
+select a.kind, (ip.id is not null)::bool as installment, p.currency, sum(p.amount)::bigint as amount
 from postings p
 join transactions t on t.id = p.transaction_id
 join accounts a on a.id = p.account_id
+left join installment_plans ip on ip.account_id = a.id
 where a.user_id = @user_id and a.kind in ('receivable', 'payable') and t.deleted_at is null
-group by a.kind, p.currency
+group by a.kind, (ip.id is not null), p.currency
 having sum(p.amount) <> 0
-order by a.kind, p.currency;
+order by 1, 2, 3;

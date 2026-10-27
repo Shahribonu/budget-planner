@@ -31,6 +31,8 @@ type Debt struct {
 	DueOn        *time.Time
 	Note         string
 	CreatedAt    time.Time
+	OccurredOn   time.Time // when the money was lent or borrowed
+	AccountID    *int64    // the account it moved through; nil for a debt from before tracking
 }
 
 type NewDebt struct {
@@ -72,6 +74,9 @@ func (s *Service) CreateDebt(ctx context.Context, userID int64, in NewDebt) (Deb
 	}
 	if utf8.RuneCountInString(in.Note) > maxDescription {
 		return Debt{}, invalid("invalid_note", "note", "note is too long")
+	}
+	if in.DueOn != nil && in.DueOn.Before(in.OccurredOn) {
+		return Debt{}, invalid("invalid_due_date", "due_on", "due date is before the debt date")
 	}
 
 	var out Debt
@@ -119,6 +124,7 @@ func (s *Service) CreateDebt(ctx context.Context, userID int64, in NewDebt) (Deb
 			return err
 		}
 		out = toDebt(d.ID, d.Direction, d.Counterparty, d.Currency, d.DueOn, d.Note, d.CreatedAt, sign*in.AmountMinor, in.AmountMinor)
+		out.OccurredOn, out.AccountID = in.OccurredOn, in.AccountID
 		return audit(ctx, q, userID, "debt", d.ID, "create", nil, out)
 	})
 	return out, err
@@ -158,26 +164,34 @@ func (s *Service) ListDebts(ctx context.Context, userID int64) ([]Debt, error) {
 	}
 	out := make([]Debt, 0, len(rows))
 	for _, r := range rows {
-		principal, err := s.debtPrincipal(ctx, q, userID, r.AccountID, r.Direction)
+		acc := r.AccountID
+		history, _, err := s.listAll(ctx, q, userID, Filter{AccountID: &acc, Type: ptrTo(string(DebtTx))})
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, toDebt(r.ID, r.Direction, r.Counterparty, r.Currency, r.DueOn, r.Note, r.CreatedAt, r.Balance, principal))
+		principal, on, account := debtOrigin(history)
+		d := toDebt(r.ID, r.Direction, r.Counterparty, r.Currency, r.DueOn, r.Note, r.CreatedAt, r.Balance, principal)
+		d.OccurredOn, d.AccountID = on, account
+		out = append(out, d)
 	}
 	return out, nil
 }
 
-// debtPrincipal sums the debt-creating transactions on a debt account.
-func (s *Service) debtPrincipal(ctx context.Context, q *dbq.Queries, userID, accountID int64, direction string) (int64, error) {
-	ts, _, err := s.listAll(ctx, q, userID, Filter{AccountID: &accountID, Type: ptrTo(string(DebtTx))})
-	if err != nil {
-		return 0, err
+// debtOrigin sums the debt-creating transactions on a debt account and returns the first
+// one's date and account.
+func debtOrigin(history []Transaction) (principal int64, on time.Time, account *int64) {
+	for _, t := range history { // newest first
+		if t.Type != DebtTx {
+			continue
+		}
+		principal += t.AmountMinor
+		on, account = t.OccurredOn, nil
+		if t.AccountID != 0 {
+			a := t.AccountID
+			account = &a
+		}
 	}
-	var sum int64
-	for _, t := range ts {
-		sum += t.AmountMinor
-	}
-	return sum, nil
+	return principal, on, account
 }
 
 func ptrTo[T any](v T) *T { return &v }
@@ -192,13 +206,10 @@ func (s *Service) GetDebt(ctx context.Context, userID, id int64) (Debt, []Transa
 	if err != nil {
 		return Debt{}, nil, err
 	}
-	var principal int64
-	for _, t := range history {
-		if t.Type == DebtTx {
-			principal += t.AmountMinor
-		}
-	}
-	return toDebt(r.ID, r.Direction, r.Counterparty, r.Currency, r.DueOn, r.Note, r.CreatedAt, r.Balance, principal), history, nil
+	principal, on, account := debtOrigin(history)
+	d := toDebt(r.ID, r.Direction, r.Counterparty, r.Currency, r.DueOn, r.Note, r.CreatedAt, r.Balance, principal)
+	d.OccurredOn, d.AccountID = on, account
+	return d, history, nil
 }
 
 // listAll pages through every matching transaction (debt histories are short).
@@ -424,8 +435,8 @@ func (s *Service) CreatePlan(ctx context.Context, userID int64, in NewPlan) (Pla
 	if in.TotalMinor < int64(in.Months)*100 {
 		return Plan{}, invalid("invalid_amount", "total_minor", "total is too small for that many months")
 	}
-	if in.FirstDueOn.Year() < 2000 {
-		return Plan{}, invalid("invalid_date", "first_due_on", "first due date is required")
+	if in.FirstDueOn.Before(in.OccurredOn) || in.FirstDueOn.After(in.OccurredOn.AddDate(1, 0, 0)) {
+		return Plan{}, invalid("invalid_date", "first_due_on", "first payment must be within a year after the purchase")
 	}
 
 	var id int64

@@ -35,6 +35,7 @@ interface WebApp {
   disableVerticalSwipes?(): void
   setHeaderColor?(color: string): void
   setBackgroundColor?(color: string): void
+  showConfirm?(message: string, callback: (ok: boolean) => void): void
   onEvent(event: 'themeChanged', cb: () => void): void
   BackButton: BackButtonApi
   MainButton: BottomButton
@@ -134,6 +135,10 @@ export const mainButton = {
     if (enabled) main?.enable()
     else main?.disable()
   },
+  setVisible(visible: boolean): void {
+    if (visible) main?.show()
+    else main?.hide()
+  },
   setProgress(busy: boolean): void {
     if (busy) main?.showProgress(false)
     else main?.hideProgress()
@@ -146,4 +151,13 @@ export const haptic = {
   warning: () => inTelegram && webApp?.HapticFeedback.notificationOccurred('warning'),
   impact: (style: ImpactStyle = 'light') => inTelegram && webApp?.HapticFeedback.impactOccurred(style),
   selection: () => inTelegram && webApp?.HapticFeedback.selectionChanged(),
+}
+
+/** Native confirm popup in Telegram (6.2+), window.confirm elsewhere. */
+export function confirmDialog(message: string): Promise<boolean> {
+  const show = webApp?.showConfirm
+  if (inTelegram && webApp && show && webApp.isVersionAtLeast('6.2')) {
+    return new Promise((resolve) => show.call(webApp, message, resolve))
+  }
+  return Promise.resolve(window.confirm(message))
 }

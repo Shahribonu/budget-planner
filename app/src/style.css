@@ -17,6 +17,7 @@
   --fb-destructive: #d63a3a;
   --income: #1f9d55;
   --expense: #d63a3a;
+  --warning: #c77800;
   color-scheme: light;
 }
 
@@ -33,6 +34,7 @@
   --fb-destructive: #ec5f5f;
   --income: #4fc27d;
   --expense: #ef6b6b;
+  --warning: #f0b43c;
   color-scheme: dark;
 }
 
@@ -49,6 +51,7 @@
   --color-danger: var(--tg-theme-destructive-text-color, var(--fb-destructive));
   --color-income: var(--income);
   --color-expense: var(--expense);
+  --color-warning: var(--warning);
 }
 
 :root {
@@ -81,4 +84,20 @@ body {
     transform: scale(0.97);
     opacity: 0.8;
   }
+}
+
+@utility form-label {
+  @apply mb-2 block text-sm font-medium text-hint;
+}
+
+@utility form-input {
+  @apply w-full rounded-xl bg-surface px-3 py-3 outline-none placeholder:text-hint;
+}
+
+@utility form-error {
+  @apply mt-1 block text-sm text-danger;
+}
+
+@utility card {
+  @apply rounded-2xl bg-surface;
 }

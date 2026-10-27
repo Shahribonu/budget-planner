@@ -18,6 +18,7 @@ import { categoryLabel } from '@/i18n'
 import { addDays } from '@/lib/dates'
 import { currencyLabel, formatMoney, parseAmount, toInputValue } from '@/lib/money'
 import { haptic } from '@/lib/telegram'
+import { isManaged, txRoute } from '@/lib/transactions'
 import { useAccountsStore } from '@/stores/accounts'
 import { useCategoriesStore } from '@/stores/categories'
 import { useLedgerStore } from '@/stores/ledger'
@@ -58,7 +59,8 @@ const saving = ref(false)
 // Idempotency key: a double tap on Save records one transaction.
 const sourceRef = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-const readOnly = computed(() => original.value?.type === 'opening')
+// Opening balances (and any managed row without a debt/plan link) can only be deleted here.
+const readOnly = computed(() => !!original.value && (original.value.type === 'opening' || isManaged(original.value.type)))
 
 const accountOptions = computed<Account[]>(() => {
   const list = [...accounts.active]
@@ -125,7 +127,7 @@ watch([type, accountId], () => {
 
 function fill(tx: Transaction) {
   original.value = tx
-  if (tx.type !== 'opening') type.value = tx.type
+  if (tx.type !== 'opening' && !isManaged(tx.type)) type.value = tx.type
   amount.value = toInputValue(tx.amount_minor, tx.currency)
   accountId.value = tx.account_id
   toAccountId.value = tx.to_account_id ?? null
@@ -144,6 +146,11 @@ async function load() {
       categories.load(),
       editId ? api.getTransaction(editId) : Promise.resolve(null),
     ])
+    // Debts and plans are edited on their own screens (PUT would return managed_elsewhere).
+    if (tx && isManaged(tx.type) && (tx.debt_id || tx.installment_id)) {
+      await router.replace(txRoute(tx))
+      return
+    }
     if (tx) fill(tx)
     else pickDefaultAccount()
     loading.value = false

@@ -12,11 +12,13 @@ import (
 
 type Filter struct {
 	From, To   *time.Time
-	Type       *string
+	Type       *string // one type, or several separated by commas: "expense,installment"
 	CategoryID *int64
 	AccountID  *int64
 	Currency   *string
 	Q          *string
+	DebtID     *int64 // transactions of one debt
+	PlanID     *int64 // transactions of one installment plan
 	Cursor     string
 	Limit      int
 }
@@ -27,8 +29,11 @@ func (s *Service) List(ctx context.Context, userID int64, f Filter) ([]Transacti
 		f.Limit = 50
 	}
 	p := dbq.ListTransactionsParams{
-		UserID: userID, FromDate: f.From, ToDate: f.To, Type: f.Type, CategoryID: f.CategoryID,
+		UserID: userID, FromDate: f.From, ToDate: f.To, CategoryID: f.CategoryID,
 		AccountID: f.AccountID, Currency: f.Currency, Lim: int32(f.Limit + 1),
+	}
+	if f.Type != nil {
+		p.Types = strings.Split(*f.Type, ",")
 	}
 	if f.Q != nil && strings.TrimSpace(*f.Q) != "" {
 		q := escapeLike(strings.TrimSpace(*f.Q))
@@ -43,6 +48,20 @@ func (s *Service) List(ctx context.Context, userID int64, f Filter) ([]Transacti
 	}
 
 	q := dbq.New(s.pool)
+	switch {
+	case f.DebtID != nil:
+		acc, err := q.DebtAccount(ctx, dbq.DebtAccountParams{ID: *f.DebtID, UserID: userID})
+		if err != nil {
+			return nil, "", notFound(err)
+		}
+		p.AccountID = &acc
+	case f.PlanID != nil:
+		acc, err := q.PlanAccount(ctx, dbq.PlanAccountParams{ID: *f.PlanID, UserID: userID})
+		if err != nil {
+			return nil, "", notFound(err)
+		}
+		p.AccountID = &acc
+	}
 	rows, err := q.ListTransactions(ctx, p)
 	if err != nil {
 		return nil, "", err
@@ -100,14 +119,15 @@ type CategoryTotal struct {
 }
 
 type Summary struct {
-	Month      string
-	Balances   []Money
-	Income     []Money
-	Expense    []Money
-	ByCategory []CategoryTotal
-	Recent     []Transaction
-	OwedToMe   []Money // open debts and anything else receivable
-	IOwe       []Money // open debts and installment plans, as positive amounts
+	Month        string
+	Balances     []Money
+	Income       []Money
+	Expense      []Money
+	ByCategory   []CategoryTotal
+	Recent       []Transaction
+	OwedToMe     []Money // open debts owed to the user
+	IOwe         []Money // open debts the user owes, as positive amounts
+	Installments []Money // left to pay on installment plans, as positive amounts
 }
 
 // Summary returns Home screen data. month is "YYYY-MM"; empty means the current month
@@ -126,7 +146,7 @@ func (s *Service) Summary(ctx context.Context, userID int64, month string) (Summ
 		return Summary{}, invalid("invalid_month", "month", "month must be YYYY-MM")
 	}
 	to := from.AddDate(0, 1, 0)
-	out := Summary{Month: from.Format("2006-01"), Balances: []Money{}, Income: []Money{}, Expense: []Money{}, ByCategory: []CategoryTotal{}, OwedToMe: []Money{}, IOwe: []Money{}}
+	out := Summary{Month: from.Format("2006-01"), Balances: []Money{}, Income: []Money{}, Expense: []Money{}, ByCategory: []CategoryTotal{}, OwedToMe: []Money{}, IOwe: []Money{}, Installments: []Money{}}
 
 	bal, err := q.AssetTotals(ctx, userID)
 	if err != nil {
@@ -161,9 +181,12 @@ func (s *Service) Summary(ctx context.Context, userID int64, month string) (Summ
 		return Summary{}, err
 	}
 	for _, o := range owed {
-		if o.Kind == "receivable" {
+		switch {
+		case o.Kind == "receivable":
 			out.OwedToMe = append(out.OwedToMe, Money{o.Amount, o.Currency})
-		} else {
+		case o.Installment:
+			out.Installments = append(out.Installments, Money{-o.Amount, o.Currency})
+		default:
 			out.IOwe = append(out.IOwe, Money{-o.Amount, o.Currency})
 		}
 	}

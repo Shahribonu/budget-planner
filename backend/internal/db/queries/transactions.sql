@@ -34,8 +34,8 @@ where id = @id and user_id = @user_id
 returning *;
 
 -- name: ListPostings :many
-select p.transaction_id, p.account_id, p.amount, p.currency, a.kind,
-       d.id as debt_id, ip.id as plan_id
+select p.transaction_id, p.account_id, p.amount, p.currency, a.kind, a.name as account_name,
+       d.id as debt_id, d.direction as debt_direction, ip.id as plan_id
 from postings p
 join accounts a on a.id = p.account_id
 left join debts d on d.account_id = a.id
@@ -48,7 +48,7 @@ select t.* from transactions t
 where t.user_id = @user_id and t.deleted_at is null
   and (sqlc.narg(from_date)::date is null or t.occurred_on >= sqlc.narg(from_date)::date)
   and (sqlc.narg(to_date)::date is null or t.occurred_on <= sqlc.narg(to_date)::date)
-  and (sqlc.narg(type)::text is null or t.type = sqlc.narg(type)::text)
+  and (sqlc.narg(types)::text[] is null or t.type = any(sqlc.narg(types)::text[]))
   and (sqlc.narg(category_id)::bigint is null or t.category_id = sqlc.narg(category_id)::bigint)
   and (sqlc.narg(q)::text is null or t.description ilike '%' || sqlc.narg(q)::text || '%')
   and (sqlc.narg(account_id)::bigint is null or exists (
@@ -60,6 +60,17 @@ where t.user_id = @user_id and t.deleted_at is null
        or (t.occurred_on, t.id) < (sqlc.narg(cursor_date)::date, sqlc.narg(cursor_id)::bigint))
 order by t.occurred_on desc, t.id desc
 limit @lim;
+
+-- name: LiabilityBalancesOfTransaction :many
+-- Balances of the debt and plan accounts a transaction touches, to refuse a restore that
+-- would pay back more than was owed.
+select a.kind, coalesce(sum(p.amount) filter (where t.deleted_at is null), 0)::bigint as balance
+from accounts a
+join postings p on p.account_id = a.id
+join transactions t on t.id = p.transaction_id
+where a.kind in ('receivable', 'payable')
+  and a.id in (select p2.account_id from postings p2 where p2.transaction_id = @transaction_id)
+group by a.id, a.kind;
 
 -- name: InsertAudit :exec
 insert into audit_log (user_id, entity, entity_id, action, before, after)

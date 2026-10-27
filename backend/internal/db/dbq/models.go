@@ -11,16 +11,19 @@ import (
 )
 
 type Account struct {
-	ID          int64
-	UserID      int64
-	HouseholdID *int64
-	Kind        string
-	Type        *string
-	Name        string
-	Currency    string
-	SystemKey   *string
-	ArchivedAt  *time.Time
-	CreatedAt   time.Time
+	ID            int64
+	UserID        int64
+	HouseholdID   *int64
+	Kind          string
+	Type          *string
+	Name          string
+	Currency      string
+	SystemKey     *string
+	ArchivedAt    *time.Time
+	CreatedAt     time.Time
+	CardMask      *string
+	BankBalance   *int64
+	BankBalanceAt *time.Time
 }
 
 type AuditLog struct {
@@ -150,12 +153,55 @@ type MerchantRule struct {
 	UpdatedAt  time.Time
 }
 
+type MonthlyPlan struct {
+	ID             int64
+	UserID         int64
+	Month          time.Time
+	Currency       string
+	IncomeOverride *int64
+	IncomeDay      *int32
+	Savings        int64
+	BufferOverride *int64
+	CreatedAt      time.Time
+}
+
+type PlanItem struct {
+	ID             int64
+	PlanID         int64
+	Title          string
+	CategoryID     *int64
+	AmountMin      int64
+	AmountMax      int64
+	Priority       string
+	DueOn          *time.Time
+	Status         string
+	PostponedCount int32
+	TransactionID  *int64
+	CarriedFrom    *int64
+	Note           string
+	CreatedAt      time.Time
+}
+
 type Posting struct {
 	ID            int64
 	TransactionID int64
 	AccountID     int64
 	Amount        int64
 	Currency      string
+}
+
+type Recurring struct {
+	ID         int64
+	UserID     int64
+	Kind       string
+	Title      string
+	CategoryID *int64
+	Currency   string
+	Amount     int64
+	DayOfMonth int32
+	AccountID  *int64
+	CreatedAt  time.Time
+	DeletedAt  *time.Time
 }
 
 type Transaction struct {
@@ -174,16 +220,19 @@ type Transaction struct {
 }
 
 type User struct {
-	ID            int64
-	TelegramID    int64
-	FirstName     string
-	Username      *string
-	Language      string
-	MainCurrency  string
-	Timezone      string
-	CreatedAt     time.Time
-	StartedAt     *time.Time
-	NotifyEnabled bool
-	NotifyTime    pgtype.Time
-	LastSummaryOn *time.Time
+	ID                int64
+	TelegramID        int64
+	FirstName         string
+	Username          *string
+	Language          string
+	MainCurrency      string
+	Timezone          string
+	CreatedAt         time.Time
+	StartedAt         *time.Time
+	NotifyEnabled     bool
+	NotifyTime        pgtype.Time
+	LastSummaryOn     *time.Time
+	ChatMode          *string
+	ChatModeUntil     *time.Time
+	PlanPromptedMonth *time.Time
 }

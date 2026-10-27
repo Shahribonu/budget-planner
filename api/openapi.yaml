@@ -99,9 +99,11 @@ paths:
         - { name: to, in: query, schema: { type: string, format: date } }
         - { name: account_id, in: query, schema: { type: integer, format: int64 } }
         - { name: category_id, in: query, schema: { type: integer, format: int64 } }
-        - { name: type, in: query, schema: { $ref: "#/components/schemas/TransactionType" } }
+        - { name: type, in: query, description: "One type or several, comma-separated: expense,installment", schema: { type: string } }
         - { name: currency, in: query, schema: { $ref: "#/components/schemas/Currency" } }
         - { name: q, in: query, description: Search in description, schema: { type: string } }
+        - { name: debt_id, in: query, description: Transactions of one debt (404 if not the user's), schema: { type: integer, format: int64 } }
+        - { name: installment_id, in: query, description: Transactions of one installment plan (404 if not the user's), schema: { type: integer, format: int64 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
       responses:
@@ -149,10 +151,11 @@ paths:
   /transactions/{id}/restore:
     parameters: [{ $ref: "#/components/parameters/Id" }]
     post:
-      summary: Undo a delete
+      summary: Undo a delete. Works for repayments and plan payments too, unless restoring would pay back more than is owed.
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "code overpayment", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /summary:
     get:
@@ -187,8 +190,9 @@ paths:
                 amount_minor: { type: integer, format: int64, minimum: 1 }
                 account_id: { type: [integer, "null"], format: int64, description: "Account the money left (lent) or arrived in (borrowed). Omit for a debt from before tracking: no balance changes." }
                 occurred_on: { type: string, format: date }
-                due_on: { type: [string, "null"], format: date }
+                due_on: { type: [string, "null"], format: date, description: "Not before occurred_on (422 invalid_due_date)" }
                 note: { type: string, maxLength: 200 }
+      description: account_id must be in the debt's currency (422 currency_mismatch).
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Debt" } } } }
         "422": { $ref: "#/components/responses/Invalid" }
@@ -263,8 +267,8 @@ paths:
                 category_id: { type: integer, format: int64, description: Expense category of the purchase }
                 currency: { $ref: "#/components/schemas/Currency" }
                 total_minor: { type: integer, format: int64 }
-                months: { type: integer, minimum: 1, maximum: 60 }
-                first_due_on: { type: string, format: date }
+                months: { type: integer, minimum: 1, maximum: 60, description: "total_minor must be at least months × 100 (one so'm or dollar per payment)" }
+                first_due_on: { type: string, format: date, description: Within a year after occurred_on }
                 pay_from_account_id: { type: [integer, "null"], format: int64, description: Default account for payments }
                 occurred_on: { type: string, format: date, description: Purchase date }
                 record_purchase: { type: boolean, default: true, description: "false for a plan started before tracking: the debt is recorded but the past purchase is not counted as spending" }
@@ -311,10 +315,10 @@ paths:
                 required: [month, days_left, budgets]
                 properties:
                   month: { type: string, example: 2026-10 }
-                  days_left: { type: integer, description: Days left in the month after today; 0 for a past month }
+                  days_left: { type: integer, description: "Days left in the month after today (today not included); 0 for a past month. A daily pace that counts today divides by days_left + 1." }
                   budgets: { type: array, items: { $ref: "#/components/schemas/Budget" } }
     post:
-      summary: Create a budget. One per category and currency; category_id null is the overall monthly limit.
+      summary: Create a budget. One per category and currency; category_id null is the overall monthly limit. A budget is the same limit every month.
       requestBody:
         required: true
         content:
@@ -333,14 +337,14 @@ paths:
   /budgets/{id}:
     parameters: [{ $ref: "#/components/parameters/Id" }]
     patch:
-      summary: Change the limit
+      summary: Change the limit (applies to every month, including the current one)
       requestBody:
         required: true
         content:
           application/json:
             schema: { type: object, required: [amount_minor], properties: { amount_minor: { type: integer, format: int64, minimum: 1 } } }
       responses:
-        "204": { description: Updated }
+        "200": { description: Updated, with this month's spending, content: { application/json: { schema: { $ref: "#/components/schemas/Budget" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       summary: Delete
@@ -458,14 +462,15 @@ components:
     PaymentInput:
       type: object
       required: [account_id, occurred_on]
+      description: The account's currency must match the debt or plan (422 currency_mismatch).
       properties:
-        amount_minor: { type: integer, format: int64, minimum: 0 }
+        amount_minor: { type: integer, format: int64, minimum: 0, description: "Debts: required, positive. Installments: 0 or omitted pays the rest of the next payment." }
         account_id: { type: integer, format: int64 }
         occurred_on: { type: string, format: date }
 
     Debt:
       type: object
-      required: [id, direction, counterparty, currency, principal_minor, remaining_minor, due_on, note, closed, created_at]
+      required: [id, direction, counterparty, currency, principal_minor, remaining_minor, due_on, note, closed, created_at, occurred_on, account_id]
       properties:
         id: { type: integer, format: int64 }
         direction: { type: string, enum: [lent, borrowed], description: "lent: they owe you; borrowed: you owe them" }
@@ -477,6 +482,8 @@ components:
         note: { type: string }
         closed: { type: boolean, description: remaining_minor is 0 }
         created_at: { type: string, format: date-time }
+        occurred_on: { type: string, format: date, description: When the money was lent or borrowed }
+        account_id: { type: [integer, "null"], format: int64, description: Account the money moved through; null for a debt from before tracking }
 
     ScheduleRow:
       type: object
@@ -509,7 +516,7 @@ components:
     Budget:
       type: object
       required: [id, category_id, currency, amount_minor, spent_minor, remaining_minor]
-      description: The bot alerts once at 80% and once at 100% per month.
+      description: "The bot alerts once per month when spent_minor ≥ 80% of amount_minor and once when ≥ 100%. Drill down with type=expense,installment."
       properties:
         id: { type: integer, format: int64 }
         category_id: { type: [integer, "null"], format: int64, description: null is the overall monthly limit }
@@ -537,10 +544,12 @@ components:
         created_at: { type: string, format: date-time }
         debt_id: { type: [integer, "null"], format: int64 }
         installment_id: { type: [integer, "null"], format: int64 }
+        debt_direction: { type: [string, "null"], enum: [lent, borrowed, null], description: For debt and debt_payment }
+        counterparty: { type: [string, "null"], description: The person, for debt and debt_payment }
 
     Summary:
       type: object
-      required: [month, balances, income, expense, by_category, recent, owed_to_me, i_owe]
+      required: [month, balances, income, expense, by_category, recent, owed_to_me, i_owe, installments]
       properties:
         month: { type: string, example: 2026-10 }
         balances: { type: array, description: Total of asset accounts per currency, items: { $ref: "#/components/schemas/Money" } }
@@ -558,4 +567,5 @@ components:
               currency: { $ref: "#/components/schemas/Currency" }
         recent: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/Transaction" } }
         owed_to_me: { type: array, description: Open debts owed to the user, per currency, items: { $ref: "#/components/schemas/Money" } }
-        i_owe: { type: array, description: Open debts and installment plans the user owes, per currency, positive, items: { $ref: "#/components/schemas/Money" } }
+        i_owe: { type: array, description: Open debts the user owes, per currency, positive, items: { $ref: "#/components/schemas/Money" } }
+        installments: { type: array, description: Left to pay on installment plans, per currency, positive, items: { $ref: "#/components/schemas/Money" } }

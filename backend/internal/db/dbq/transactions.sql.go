@@ -175,9 +175,46 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 	return i, err
 }
 
+const liabilityBalancesOfTransaction = `-- name: LiabilityBalancesOfTransaction :many
+select a.kind, coalesce(sum(p.amount) filter (where t.deleted_at is null), 0)::bigint as balance
+from accounts a
+join postings p on p.account_id = a.id
+join transactions t on t.id = p.transaction_id
+where a.kind in ('receivable', 'payable')
+  and a.id in (select p2.account_id from postings p2 where p2.transaction_id = $1)
+group by a.id, a.kind
+`
+
+type LiabilityBalancesOfTransactionRow struct {
+	Kind    string
+	Balance int64
+}
+
+// Balances of the debt and plan accounts a transaction touches, to refuse a restore that
+// would pay back more than was owed.
+func (q *Queries) LiabilityBalancesOfTransaction(ctx context.Context, transactionID int64) ([]LiabilityBalancesOfTransactionRow, error) {
+	rows, err := q.db.Query(ctx, liabilityBalancesOfTransaction, transactionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LiabilityBalancesOfTransactionRow
+	for rows.Next() {
+		var i LiabilityBalancesOfTransactionRow
+		if err := rows.Scan(&i.Kind, &i.Balance); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPostings = `-- name: ListPostings :many
-select p.transaction_id, p.account_id, p.amount, p.currency, a.kind,
-       d.id as debt_id, ip.id as plan_id
+select p.transaction_id, p.account_id, p.amount, p.currency, a.kind, a.name as account_name,
+       d.id as debt_id, d.direction as debt_direction, ip.id as plan_id
 from postings p
 join accounts a on a.id = p.account_id
 left join debts d on d.account_id = a.id
@@ -192,7 +229,9 @@ type ListPostingsRow struct {
 	Amount        int64
 	Currency      string
 	Kind          string
+	AccountName   string
 	DebtID        *int64
+	DebtDirection *string
 	PlanID        *int64
 }
 
@@ -211,7 +250,9 @@ func (q *Queries) ListPostings(ctx context.Context, transactionIds []int64) ([]L
 			&i.Amount,
 			&i.Currency,
 			&i.Kind,
+			&i.AccountName,
 			&i.DebtID,
+			&i.DebtDirection,
 			&i.PlanID,
 		); err != nil {
 			return nil, err
@@ -229,7 +270,7 @@ select t.id, t.user_id, t.household_id, t.type, t.occurred_on, t.category_id, t.
 where t.user_id = $1 and t.deleted_at is null
   and ($2::date is null or t.occurred_on >= $2::date)
   and ($3::date is null or t.occurred_on <= $3::date)
-  and ($4::text is null or t.type = $4::text)
+  and ($4::text[] is null or t.type = any($4::text[]))
   and ($5::bigint is null or t.category_id = $5::bigint)
   and ($6::text is null or t.description ilike '%' || $6::text || '%')
   and ($7::bigint is null or exists (
@@ -247,7 +288,7 @@ type ListTransactionsParams struct {
 	UserID     int64
 	FromDate   *time.Time
 	ToDate     *time.Time
-	Type       *string
+	Types      []string
 	CategoryID *int64
 	Q          *string
 	AccountID  *int64
@@ -262,7 +303,7 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 		arg.UserID,
 		arg.FromDate,
 		arg.ToDate,
-		arg.Type,
+		arg.Types,
 		arg.CategoryID,
 		arg.Q,
 		arg.AccountID,

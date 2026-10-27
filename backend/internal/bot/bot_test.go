@@ -326,7 +326,7 @@ func TestSummaryRemindsDuePayments(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := l.CreateDebt(ctx, userID, ledger.NewDebt{Direction: "lent", Counterparty: "Aziz", Currency: "UZS",
-		AmountMinor: 200_000_00, OccurredOn: today, DueOn: ptr(today.AddDate(0, 0, -2))}); err != nil {
+		AmountMinor: 200_000_00, OccurredOn: today.AddDate(0, 0, -10), DueOn: ptr(today.AddDate(0, 0, -2))}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := l.CreateDebt(ctx, userID, ledger.NewDebt{Direction: "lent", Counterparty: "Later", Currency: "UZS",
@@ -399,6 +399,35 @@ func TestBudgetAlertsOncePerThreshold(t *testing.T) {
 	}
 	if a := alerts(); len(a) != 0 {
 		t.Errorf("100%% alert repeated: %v", a)
+	}
+}
+
+func TestForwardedBankMessage(t *testing.T) {
+	h := setup(t, stt.None{})
+	h.b.HandleUpdate(ctx, h.message("💸 To'lov\n➖ 37.470,00 UZS\n📍 AAB CLICK QR OPLATA\n💳 HUMOCARD *5958\n🕓 18:38 23.10.2026\n💰 118.363,04 UZS"))
+	msgs := sent(h.tg.take(), "sendMessage")
+	if len(msgs) != 1 || !strings.Contains(msgs[0].body["text"].(string), "*5958") {
+		t.Fatalf("card question = %+v", msgs)
+	}
+	var create string
+	for _, d := range buttonData(msgs[0]) {
+		if strings.HasPrefix(d, "bc:") && strings.HasSuffix(d, ":0") {
+			create = d
+		}
+	}
+	h.b.HandleUpdate(ctx, h.callback(create))
+	edits := sent(h.tg.take(), "editMessageText")
+	if len(edits) != 1 {
+		t.Fatalf("edits = %+v", edits)
+	}
+	card := edits[0].body["text"].(string)
+	for _, want := range []string{"37\u202f470 so'm", "Humo *5958", "Click QR"} {
+		if !strings.Contains(card, want) {
+			t.Errorf("card lacks %q: %q", want, card)
+		}
+	}
+	if strings.Contains(card, "🏦") {
+		t.Errorf("new account should match the bank: %q", card)
 	}
 }
 

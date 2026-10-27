@@ -292,3 +292,23 @@ func TestNoAmount(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func dbqRule(userID int64, pattern string) dbq.GetMerchantRuleParams {
+	return dbq.GetMerchantRuleParams{UserID: userID, Pattern: pattern}
+}
+
+func mustDate(s string) time.Time {
+	d, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
+func total(ms []ledger.Money) int64 {
+	var t int64
+	for _, m := range ms {
+		t += m.AmountMinor
+	}
+	return t
+}
