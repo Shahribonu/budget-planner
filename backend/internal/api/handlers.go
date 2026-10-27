@@ -480,3 +480,13 @@ func (s *Server) createInvoice(w http.ResponseWriter, r *http.Request) {
 	stars := map[string]int{billing.Monthly: p.MonthlyStars, billing.Yearly: p.YearlyStars}[in.Plan]
 	writeJSON(w, http.StatusOK, map[string]any{"url": link, "stars": stars})
 }
+
+// billingPlans returns current Premium prices so the app and the bot always agree.
+func (s *Server) billingPlans(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Billing == nil {
+		writeError(w, http.StatusServiceUnavailable, "billing_unavailable", "", "payments are not configured")
+		return
+	}
+	p := s.cfg.Billing.Prices()
+	writeJSON(w, http.StatusOK, map[string]any{"monthly_stars": p.MonthlyStars, "yearly_stars": p.YearlyStars, "free_budgets": ledger.FreeBudgets})
+}

@@ -254,6 +254,23 @@ func TestPlanEndToEnd(t *testing.T) {
 	c.do("POST", "/api/recurring", map[string]any{"kind": "income", "title": "Oylik", "currency": "UZS", "amount_minor": 8_000_000_00, "day_of_month": 10}, 201)
 	rent := c.do("POST", "/api/recurring", map[string]any{"kind": "expense", "title": "Ijara", "currency": "UZS", "amount_minor": 3_000_000_00, "day_of_month": 1}, 201)
 	c.do("POST", "/api/recurring", map[string]any{"kind": "expense", "title": "X", "currency": "UZS", "amount_minor": 1, "day_of_month": 32}, 422)
+	var rentCat, salaryCat int64
+	for _, cat := range c.do("GET", "/api/categories", nil, 200)["categories"].([]any) {
+		m := cat.(map[string]any)
+		switch m["key"] {
+		case "rent":
+			rentCat = num(m["id"])
+		case "salary":
+			salaryCat = num(m["id"])
+		}
+	}
+	if got := c.do("PATCH", fmt.Sprintf("/api/recurring/%d", num(rent["id"])), map[string]any{"category_id": rentCat}, 200); num(got["category_id"]) != rentCat {
+		t.Errorf("recurring category = %v", got)
+	}
+	c.do("PATCH", fmt.Sprintf("/api/recurring/%d", num(rent["id"])), map[string]any{"category_id": salaryCat}, 422)
+	if got := c.do("PATCH", fmt.Sprintf("/api/recurring/%d", num(rent["id"])), map[string]any{"category_id": nil}, 200); got["category_id"] != nil {
+		t.Errorf("category not cleared = %v", got)
+	}
 
 	preview := c.do("POST", "/api/plan/parse"+q, map[string]any{"text": "qishki kurtka 700-900 ming, AirPods 2.5 mln agar bo'lsa"}, 200)["items"].([]any)
 	if len(preview) != 2 || preview[1].(map[string]any)["priority"] != "nice" {
@@ -267,6 +284,9 @@ func TestPlanEndToEnd(t *testing.T) {
 	items := plan["items"].([]any)
 	if len(items) != 2 || items[0].(map[string]any)["decision"] == nil {
 		t.Fatalf("items = %v", items)
+	}
+	if line := in["lines"].([]any)[0].(map[string]any); num(line["ref_id"]) != num(rent["id"]) {
+		t.Errorf("line ref = %v", line)
 	}
 
 	// Savings and an income override; then clear the override with null.
@@ -292,7 +312,13 @@ func TestPlanEndToEnd(t *testing.T) {
 	other.do("PATCH", fmt.Sprintf("/api/plan/items/%d", id), map[string]any{"status": "bought"}, 404)
 	other.do("DELETE", fmt.Sprintf("/api/recurring/%d", num(rent["id"])), nil, 404)
 
-	c.do("DELETE", fmt.Sprintf("/api/plan/items/%d", id), nil, 204)
+	if left := len(c.do("DELETE", fmt.Sprintf("/api/plan/items/%d", id), nil, 200)["items"].([]any)); left != 1 {
+		t.Errorf("items after delete = %d", left)
+	}
+	c.do("GET", "/api/plan?month=2030-01&currency=UZS&create=false", nil, 404)
+	if got := c.do("GET", "/api/plan"+q+"&create=false", nil, 200); got["month"] != "2026-11" {
+		t.Errorf("peek existing = %v", got["month"])
+	}
 	c.do("DELETE", fmt.Sprintf("/api/recurring/%d", num(rent["id"])), nil, 204)
 	if n := len(c.do("GET", "/api/recurring", nil, 200)["recurring"].([]any)); n != 1 {
 		t.Errorf("recurring left = %d", n)

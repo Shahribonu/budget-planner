@@ -39,6 +39,7 @@ func NewService(pool *pgxpool.Pool, l *ledger.Service) *Service {
 // Line is one known obligation counted in Reserved.
 type Line struct {
 	Kind   string // recurring, installment, debt
+	RefID  int64  // the recurring item, installment plan or debt
 	Title  string
 	Amount int64
 	DueOn  *time.Time
@@ -153,6 +154,21 @@ func (s *Service) Get(ctx context.Context, userID int64, month time.Time, curren
 	return s.view(ctx, userID, p)
 }
 
+// Peek returns the plan only if it exists, without creating it or carrying items over.
+func (s *Service) Peek(ctx context.Context, userID int64, month time.Time, currency string) (View, error) {
+	if err := validCurrency(currency); err != nil {
+		return View{}, err
+	}
+	p, err := s.q.GetMonthlyPlan(ctx, dbq.GetMonthlyPlanParams{UserID: userID, Month: month, Currency: currency})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return View{}, ErrNotFound
+	}
+	if err != nil {
+		return View{}, err
+	}
+	return s.view(ctx, userID, p)
+}
+
 func (s *Service) view(ctx context.Context, userID int64, p dbq.MonthlyPlan) (View, error) {
 	in, err := s.inputs(ctx, userID, p)
 	if err != nil {
@@ -244,7 +260,7 @@ func (s *Service) inputs(ctx context.Context, userID int64, p dbq.MonthlyPlan) (
 			continue
 		}
 		due := clampDay(p.Month, int(r.DayOfMonth))
-		in.Lines = append(in.Lines, Line{Kind: "recurring", Title: r.Title, Amount: r.Amount, DueOn: &due})
+		in.Lines = append(in.Lines, Line{Kind: "recurring", RefID: r.ID, Title: r.Title, Amount: r.Amount, DueOn: &due})
 	}
 
 	switch {
@@ -286,7 +302,7 @@ func (s *Service) inputs(ctx context.Context, userID int64, p dbq.MonthlyPlan) (
 			if pl.Provider != "" {
 				title = pl.Provider + " · " + pl.Title
 			}
-			in.Lines = append(in.Lines, Line{Kind: "installment", Title: title, Amount: amount, DueOn: &due})
+			in.Lines = append(in.Lines, Line{Kind: "installment", RefID: pl.ID, Title: title, Amount: amount, DueOn: &due})
 		}
 	}
 	debts, err := s.ledger.ListDebts(ctx, userID)
@@ -296,7 +312,7 @@ func (s *Service) inputs(ctx context.Context, userID int64, p dbq.MonthlyPlan) (
 	for _, d := range debts {
 		if d.Direction == "borrowed" && d.Currency == p.Currency && d.Remaining > 0 && d.DueOn != nil && d.DueOn.Before(monthEnd) {
 			due := *d.DueOn
-			in.Lines = append(in.Lines, Line{Kind: "debt", Title: d.Counterparty, Amount: d.Remaining, DueOn: &due})
+			in.Lines = append(in.Lines, Line{Kind: "debt", RefID: d.ID, Title: d.Counterparty, Amount: d.Remaining, DueOn: &due})
 		}
 	}
 	for _, l := range in.Lines {
@@ -506,7 +522,9 @@ func (s *Service) ParseItems(ctx context.Context, userID int64, currency, text s
 	}
 	// Mark ranges so the second number can be merged into the first item.
 	text = rangeRe.ReplaceAllString(text, "$1$3 ~ $2$3")
-	parsed := normalizer.Parse(text, normalizer.Options{DefaultCurrency: money.Currency(currency), Now: s.now()})
+	// Amounts are so'm unless written in dollars ("$20", "20 dollar"): "800 ming" is never
+	// 800 000 dollars, even in a USD plan. Items in the other currency are skipped.
+	parsed := normalizer.Parse(text, normalizer.Options{DefaultCurrency: money.UZS, Now: s.now()})
 	var out []NewItem
 	for i := 0; i < len(parsed); i++ {
 		it := parsed[i]
@@ -630,15 +648,20 @@ func (s *Service) planOf(ctx context.Context, userID, planID int64) (dbq.Monthly
 	return s.q.GetMonthlyPlanByID(ctx, dbq.GetMonthlyPlanByIDParams{ID: planID, UserID: userID})
 }
 
-func (s *Service) DeleteItem(ctx context.Context, userID, id int64) error {
-	n, err := s.q.DeletePlanItem(ctx, dbq.DeletePlanItemParams{ID: id, UserID: userID})
+// DeleteItem removes an item and returns the recalculated plan.
+func (s *Service) DeleteItem(ctx context.Context, userID, id int64) (View, error) {
+	it, err := s.q.GetPlanItem(ctx, dbq.GetPlanItemParams{ID: id, UserID: userID})
 	if err != nil {
-		return err
+		return View{}, ledger.ErrNotFound
 	}
-	if n == 0 {
-		return ledger.ErrNotFound
+	if _, err := s.q.DeletePlanItem(ctx, dbq.DeletePlanItemParams{ID: id, UserID: userID}); err != nil {
+		return View{}, err
 	}
-	return nil
+	p, err := s.planOf(ctx, userID, it.PlanID)
+	if err != nil {
+		return View{}, err
+	}
+	return s.view(ctx, userID, p)
 }
 
 // MatchPurchase finds a planned item a new expense probably is: same month and category,
@@ -726,7 +749,20 @@ func (s *Service) CreateRecurring(ctx context.Context, userID int64, in NewRecur
 	})
 }
 
-func (s *Service) UpdateRecurring(ctx context.Context, userID, id int64, title *string, amount *int64, day *int32) (dbq.Recurring, error) {
+// RecurringPatch edits a recurring item. Kind and currency are fixed; category_id and
+// account_id accept null (with Set*) to clear.
+type RecurringPatch struct {
+	Title       *string
+	Amount      *int64
+	Day         *int32
+	SetCategory bool
+	CategoryID  *int64
+	SetAccount  bool
+	AccountID   *int64
+}
+
+func (s *Service) UpdateRecurring(ctx context.Context, userID, id int64, p RecurringPatch) (dbq.Recurring, error) {
+	title, amount, day := p.Title, p.Amount, p.Day
 	if title != nil {
 		t := strings.TrimSpace(*title)
 		if t == "" || utf8.RuneCountInString(t) > 64 {
@@ -740,7 +776,35 @@ func (s *Service) UpdateRecurring(ctx context.Context, userID, id int64, title *
 	if day != nil && (*day < 1 || *day > 31) {
 		return dbq.Recurring{}, invalid("invalid_day", "day_of_month", "day must be 1–31")
 	}
-	r, err := s.q.UpdateRecurring(ctx, dbq.UpdateRecurringParams{Title: title, Amount: amount, DayOfMonth: day, ID: id, UserID: userID})
+	if p.SetCategory && p.CategoryID != nil || p.SetAccount && p.AccountID != nil {
+		cur, err := s.q.ListRecurring(ctx, userID)
+		if err != nil {
+			return dbq.Recurring{}, err
+		}
+		var r *dbq.Recurring
+		for i := range cur {
+			if cur[i].ID == id {
+				r = &cur[i]
+			}
+		}
+		if r == nil {
+			return dbq.Recurring{}, ledger.ErrNotFound
+		}
+		if p.SetCategory && p.CategoryID != nil {
+			c, err := s.q.GetCategory(ctx, dbq.GetCategoryParams{ID: *p.CategoryID, UserID: &userID})
+			if err != nil || c.Kind != r.Kind {
+				return dbq.Recurring{}, invalid("invalid_category", "category_id", "unknown category for this kind")
+			}
+		}
+		if p.SetAccount && p.AccountID != nil {
+			a, err := s.q.GetAssetAccount(ctx, dbq.GetAssetAccountParams{ID: *p.AccountID, UserID: userID})
+			if err != nil || a.Currency != r.Currency {
+				return dbq.Recurring{}, invalid("invalid_account", "account_id", "unknown account or different currency")
+			}
+		}
+	}
+	r, err := s.q.UpdateRecurring(ctx, dbq.UpdateRecurringParams{Title: title, Amount: amount, DayOfMonth: day,
+		SetCategory: p.SetCategory, CategoryID: p.CategoryID, SetAccount: p.SetAccount, AccountID: p.AccountID, ID: id, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ledger.ErrNotFound
 	}

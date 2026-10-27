@@ -69,6 +69,8 @@ type Decision struct {
 	Months        int
 	// For a Should item that misses by less than the savings: lowering savings once makes it fit.
 	FromSavings int64
+	// For items placed this month: free money left after this item and the ones before it.
+	LeftAfter int64
 }
 
 type Result struct {
@@ -160,6 +162,7 @@ func Plan(in Input) Result {
 			}
 			left -= it.Amount
 			res.Allocated += it.Amount
+			d.LeftAfter = left
 			if early {
 				beforeSalary -= it.Amount
 			}
@@ -168,6 +171,7 @@ func Plan(in Input) Result {
 			d.Group, d.Reason = Fits, ReasonShortfall
 			left -= it.Amount
 			res.Allocated += it.Amount
+			d.LeftAfter = left
 		case fitsMoney && !fitsTime:
 			d.Group, d.Reason = Later, ReasonBeforeSalary
 			d.SuggestMonth = in.Month

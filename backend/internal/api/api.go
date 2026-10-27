@@ -91,6 +91,7 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 		r.Post("/plan/parse", s.parsePlanText)
 		r.Patch("/plan/items/{id}", s.patchPlanItem)
 		r.Delete("/plan/items/{id}", s.deletePlanItem)
+		r.Get("/billing/plans", s.billingPlans)
 		r.Post("/billing/invoice", s.createInvoice)
 		r.Get("/recurring", s.listRecurring)
 		r.Post("/recurring", s.createRecurring)

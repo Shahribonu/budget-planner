@@ -51,6 +51,9 @@ func TestPlanSection74Example(t *testing.T) {
 		}
 	}
 	check(dentist, Fits, ReasonMust)
+	if got[dentist].LeftAfter != 400_000*sum || got[gift].LeftAfter != 100_000*sum {
+		t.Errorf("left after: dentist %d, gift %d", got[dentist].LeftAfter/sum, got[gift].LeftAfter/sum)
+	}
 	check(gift, Fits, ReasonFixedDate)
 	check(jacket, Later, ReasonNotEnough)
 	check(airpods, Reconsider, ReasonPostponed)

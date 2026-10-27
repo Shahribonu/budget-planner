@@ -358,8 +358,11 @@ paths:
       - { name: currency, in: query, description: Default the user's main currency, schema: { $ref: "#/components/schemas/Currency" } }
     get:
       summary: The month's spending plan with inputs and recommendations. Created on first use, carrying over unbought items from the month before.
+      parameters:
+        - { name: create, in: query, description: "false: only return an existing plan (404 if none) — for previews like Home", schema: { type: boolean, default: true } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlanView" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
       summary: Adjust inputs. For income_override, income_day and buffer_override, absent keeps, null clears, a value sets.
       requestBody:
@@ -395,7 +398,7 @@ paths:
     parameters:
       - { name: currency, in: query, schema: { $ref: "#/components/schemas/Currency" } }
     post:
-      summary: "Preview items from free text (\"ijara 3 mln, kurtka 700-900 ming, AirPods 2.5 mln agar bo'lsa\") with suggested category and priority. Nothing is saved; send the items to POST /plan/items."
+      summary: "Amounts are so'm unless written in dollars ($20, 20 dollar): in a USD plan, so'm amounts are skipped, never read as dollars. Preview items from free text (\"ijara 3 mln, kurtka 700-900 ming, AirPods 2.5 mln agar bo'lsa\") with suggested category and priority. Nothing is saved; send the items to POST /plan/items."
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string } } } } }
@@ -430,9 +433,9 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
     delete:
-      summary: Delete
+      summary: Delete; returns the recalculated plan
       responses:
-        "204": { description: Deleted }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PlanView" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /recurring:
@@ -468,7 +471,7 @@ paths:
   /recurring/{id}:
     parameters: [{ $ref: "#/components/parameters/Id" }]
     patch:
-      summary: Edit
+      summary: Edit. Kind and currency are fixed (delete and re-add to change them); category_id and account_id accept null to clear.
       requestBody:
         content:
           application/json:
@@ -478,6 +481,8 @@ paths:
                 title: { type: string }
                 amount_minor: { type: integer, format: int64, minimum: 1 }
                 day_of_month: { type: integer, minimum: 1, maximum: 31 }
+                category_id: { type: [integer, "null"], format: int64, description: Category of the same kind }
+                account_id: { type: [integer, "null"], format: int64, description: Account in the same currency }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Recurring" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -486,6 +491,23 @@ paths:
       responses:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /billing/plans:
+    get:
+      summary: Current Premium prices in Telegram Stars, the same the bot shows
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [monthly_stars, yearly_stars, free_budgets]
+                properties:
+                  monthly_stars: { type: integer }
+                  yearly_stars: { type: integer }
+                  free_budgets: { type: integer, description: Budgets allowed on the free plan }
+        "503": { description: Payments not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /billing/invoice:
     post:
@@ -692,7 +714,7 @@ components:
 
     PlanDecision:
       type: object
-      required: [group, reason, suggest_month, monthly_saving_minor, months, from_savings_minor]
+      required: [group, reason, suggest_month, monthly_saving_minor, months, from_savings_minor, left_after_minor]
       properties:
         group: { type: string, enum: [fits, later, reconsider] }
         reason:
@@ -707,6 +729,7 @@ components:
         monthly_saving_minor: { type: integer, format: int64, description: Suggested monthly saving for large items; 0 otherwise }
         months: { type: integer, description: Months of that saving }
         from_savings_minor: { type: integer, format: int64, description: "Should items: lowering savings once by this much makes it fit now; 0 otherwise" }
+        left_after_minor: { type: [integer, "null"], format: int64, description: "fits group only: free money left after this item and the ones placed before it" }
 
     PlanItem:
       type: object
@@ -734,6 +757,7 @@ components:
         inputs:
           type: object
           description: "Free money = income − reserved − savings − buffer. Every figure is shown with its source so the plan is explainable."
+          required: [income_minor, income_source, income_override, income_day, reserved_minor, lines, savings_minor, buffer_minor, buffer_source, buffer_override, cash_now_minor]
           properties:
             income_minor: { type: integer, format: int64 }
             income_source: { type: string, enum: [override, recurring, history, none], description: "history: the lowest of the last 3 months with income (conservative)" }
@@ -744,8 +768,10 @@ components:
               type: array
               items:
                 type: object
+                required: [kind, ref_id, title, amount_minor, due_on]
                 properties:
                   kind: { type: string, enum: [recurring, installment, debt] }
+                  ref_id: { type: integer, format: int64, description: "The recurring item, installment plan or debt: /recurring, /installments/{id}, /debts/{id}" }
                   title: { type: string }
                   amount_minor: { type: integer, format: int64 }
                   due_on: { type: [string, "null"], format: date }
@@ -756,6 +782,7 @@ components:
             cash_now_minor: { type: integer, format: int64 }
         result:
           type: object
+          required: [free_minor, allocated_minor, left_minor]
           properties:
             free_minor: { type: integer, format: int64 }
             allocated_minor: { type: integer, format: int64 }

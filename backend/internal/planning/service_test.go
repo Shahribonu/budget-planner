@@ -130,6 +130,17 @@ func TestParseItems(t *testing.T) {
 	}
 }
 
+func TestParseItemsInDollars(t *testing.T) {
+	f := setup(t)
+	items, err := f.svc.ParseItems(ctx, f.user, "USD", "kurtka 800 ming, noutbuk 900$, telefon 300 dollar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Title != "noutbuk" || items[0].AmountMin != 900*100 || items[1].AmountMin != 300*100 {
+		t.Errorf("USD plan items = %+v (so'm amounts must be skipped)", items)
+	}
+}
+
 func TestCarryOverAndMatch(t *testing.T) {
 	f := setup(t)
 	oct := nov.AddDate(0, -1, 0)

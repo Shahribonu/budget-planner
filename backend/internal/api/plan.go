@@ -10,6 +10,7 @@ import (
 
 type lineJSON struct {
 	Kind        string `json:"kind"`
+	RefID       int64  `json:"ref_id"`
 	Title       string `json:"title"`
 	AmountMinor int64  `json:"amount_minor"`
 	DueOn       *date  `json:"due_on"`
@@ -22,6 +23,7 @@ type decisionJSON struct {
 	MonthlySavingMinor int64          `json:"monthly_saving_minor"`
 	Months             int            `json:"months"`
 	FromSavingsMinor   int64          `json:"from_savings_minor"`
+	LeftAfterMinor     *int64         `json:"left_after_minor"`
 }
 
 type planItemJSON struct {
@@ -42,7 +44,7 @@ type planItemJSON struct {
 func toPlanViewJSON(v planning.View) map[string]any {
 	lines := make([]lineJSON, len(v.Inputs.Lines))
 	for i, l := range v.Inputs.Lines {
-		lines[i] = lineJSON{l.Kind, l.Title, l.Amount, optDate(l.DueOn)}
+		lines[i] = lineJSON{l.Kind, l.RefID, l.Title, l.Amount, optDate(l.DueOn)}
 	}
 	items := make([]planItemJSON, len(v.Items))
 	for i, it := range v.Items {
@@ -53,6 +55,10 @@ func toPlanViewJSON(v planning.View) map[string]any {
 		}
 		if d := it.Decision; d != nil {
 			dj := &decisionJSON{Group: d.Group, Reason: d.Reason, MonthlySavingMinor: d.MonthlySaving, Months: d.Months, FromSavingsMinor: d.FromSavings}
+			if d.Group == planning.Fits {
+				left := d.LeftAfter
+				dj.LeftAfterMinor = &left
+			}
 			if !d.SuggestMonth.IsZero() {
 				m := d.SuggestMonth.Format("2006-01")
 				dj.SuggestMonth = &m
@@ -101,7 +107,11 @@ func (s *Server) getPlanView(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := s.plan.Get(r.Context(), u.ID, month, cur)
+	get := s.plan.Get
+	if r.URL.Query().Get("create") == "false" {
+		get = s.plan.Peek // 404 when the month has no plan yet
+	}
+	v, err := get(r.Context(), u.ID, month, cur)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -245,11 +255,12 @@ func (s *Server) deletePlanItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.plan.DeleteItem(r.Context(), userID(r), id); err != nil {
+	v, err := s.plan.DeleteItem(r.Context(), userID(r), id)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, toPlanViewJSON(v))
 }
 
 // ---- recurring ----
@@ -310,15 +321,23 @@ func (s *Server) patchRecurring(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var raw map[string]any
 	var in struct {
 		Title       *string `json:"title"`
 		AmountMinor *int64  `json:"amount_minor"`
 		DayOfMonth  *int32  `json:"day_of_month"`
+		CategoryID  *int64  `json:"category_id"`
+		AccountID   *int64  `json:"account_id"`
 	}
-	if !decode(w, r, &in) {
+	if !decodeTwice(w, r, &in, &raw) {
 		return
 	}
-	x, err := s.plan.UpdateRecurring(r.Context(), userID(r), id, in.Title, in.AmountMinor, in.DayOfMonth)
+	_, setCat := raw["category_id"]
+	_, setAcc := raw["account_id"]
+	x, err := s.plan.UpdateRecurring(r.Context(), userID(r), id, planning.RecurringPatch{
+		Title: in.Title, Amount: in.AmountMinor, Day: in.DayOfMonth,
+		SetCategory: setCat, CategoryID: in.CategoryID, SetAccount: setAcc, AccountID: in.AccountID,
+	})
 	if err != nil {
 		s.fail(w, r, err)
 		return

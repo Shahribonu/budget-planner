@@ -678,17 +678,23 @@ const updateRecurring = `-- name: UpdateRecurring :one
 update recurring
 set title = coalesce($1, title),
     amount = coalesce($2, amount),
-    day_of_month = coalesce($3, day_of_month)
-where id = $4 and user_id = $5 and deleted_at is null
+    day_of_month = coalesce($3, day_of_month),
+    category_id = case when $4::bool then $5::bigint else category_id end,
+    account_id = case when $6::bool then $7::bigint else account_id end
+where id = $8 and user_id = $9 and deleted_at is null
 returning id, user_id, kind, title, category_id, currency, amount, day_of_month, account_id, created_at, deleted_at
 `
 
 type UpdateRecurringParams struct {
-	Title      *string
-	Amount     *int64
-	DayOfMonth *int32
-	ID         int64
-	UserID     int64
+	Title       *string
+	Amount      *int64
+	DayOfMonth  *int32
+	SetCategory bool
+	CategoryID  *int64
+	SetAccount  bool
+	AccountID   *int64
+	ID          int64
+	UserID      int64
 }
 
 func (q *Queries) UpdateRecurring(ctx context.Context, arg UpdateRecurringParams) (Recurring, error) {
@@ -696,6 +702,10 @@ func (q *Queries) UpdateRecurring(ctx context.Context, arg UpdateRecurringParams
 		arg.Title,
 		arg.Amount,
 		arg.DayOfMonth,
+		arg.SetCategory,
+		arg.CategoryID,
+		arg.SetAccount,
+		arg.AccountID,
 		arg.ID,
 		arg.UserID,
 	)

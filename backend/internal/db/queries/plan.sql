@@ -10,7 +10,9 @@ returning *;
 update recurring
 set title = coalesce(sqlc.narg(title), title),
     amount = coalesce(sqlc.narg(amount), amount),
-    day_of_month = coalesce(sqlc.narg(day_of_month), day_of_month)
+    day_of_month = coalesce(sqlc.narg(day_of_month), day_of_month),
+    category_id = case when @set_category::bool then sqlc.narg(category_id)::bigint else category_id end,
+    account_id = case when @set_account::bool then sqlc.narg(account_id)::bigint else account_id end
 where id = @id and user_id = @user_id and deleted_at is null
 returning *;
 
