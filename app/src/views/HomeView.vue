@@ -1,15 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter, type LocationQueryRaw } from 'vue-router'
 import { api } from '@/api/client'
 import type { Currency, Money, Transaction } from '@/api/types'
+import AccountCard from '@/components/AccountCard.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import BudgetBar from '@/components/BudgetBar.vue'
+import DonutChart, { type DonutSlice } from '@/components/DonutChart.vue'
+import UserAvatar from '@/components/UserAvatar.vue'
+import PullIndicator from '@/components/PullIndicator.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import TxRow from '@/components/TxRow.vue'
+import { useCountUp } from '@/composables/useCountUp'
 import { useFormat } from '@/composables/useFormat'
+import { usePullToRefresh } from '@/composables/usePullToRefresh'
 import { categoryLabel } from '@/i18n'
 import { formatMonth, monthRange } from '@/lib/dates'
+import { categoryStyle } from '@/lib/categoryStyle'
+import { sumSpent, weekStart } from '@/lib/insights'
+import { prefs } from '@/lib/prefs'
+import { haptic, setHeaderTint } from '@/lib/telegram'
 import { txRoute } from '@/lib/transactions'
 import { useAccountsStore } from '@/stores/accounts'
 import { useBudgetsStore } from '@/stores/budgets'
@@ -19,13 +30,14 @@ import { useLedgerStore } from '@/stores/ledger'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const { t: t_ } = useI18n()
 const user = useUserStore()
 const ledger = useLedgerStore()
 const accounts = useAccountsStore()
 const categories = useCategoriesStore()
 const budgets = useBudgetsStore()
 const plans = useInstallmentsStore()
-const { money, lang } = useFormat()
+const { money, lang, today, dayLabel } = useFormat()
 
 const failed = ref(false)
 
@@ -36,6 +48,7 @@ async function refresh() {
     void plans.load().catch(() => {})
     void budgets.load(true).catch(() => {})
     void loadPlanRow(ledger.summary?.month)
+    void loadWeek()
     failed.value = false
   } catch {
     failed.value = true
@@ -77,14 +90,6 @@ const balances = computed<Money[]>(() => {
   return list.length ? list : [{ amount_minor: 0, currency: user.mainCurrency }]
 })
 
-/** Union of currencies seen this month so income and expense line up per currency. */
-const monthCurrencies = computed<Currency[]>(() => {
-  const s = summary.value
-  if (!s) return []
-  const set = new Set([...s.income, ...s.expense].map((m) => m.currency))
-  return set.size ? [...set] : [user.mainCurrency]
-})
-
 function amountFor(list: Money[] | undefined, currency: Currency): number {
   return list?.find((m) => m.currency === currency)?.amount_minor ?? 0
 }
@@ -122,168 +127,354 @@ function drill(query: LocationQueryRaw, withMonth = true) {
 function openTx(tx: Transaction) {
   void router.push(txRoute(tx))
 }
+
+const { pull, refreshing, threshold } = usePullToRefresh(refresh)
+
+// Hero: the main-currency balance, big; other currencies small underneath.
+const heroBalance = computed<Money>(
+  () => balances.value.find((b) => b.currency === user.mainCurrency) ?? balances.value[0]!,
+)
+const otherBalances = computed(() => balances.value.filter((b) => b !== heroBalance.value))
+const shownBalance = useCountUp(computed(() => heroBalance.value.amount_minor))
+// Big but always on one line at 360px: step the size down for long amounts.
+const heroSize = computed(() => {
+  const len = money(heroBalance.value.amount_minor, heroBalance.value.currency).length
+  return len > 16 ? 'text-[28px]' : len > 13 ? 'text-[34px]' : 'text-[40px]'
+})
+
+// The hero runs into Telegram's header: tint it violet while Home is open.
+const HERO_TOP = '#5b3df5'
+onMounted(() => setHeaderTint(HERO_TOP))
+onBeforeUnmount(() => setHeaderTint(null))
+
+const premiumDays = computed(() => {
+  const until = user.me?.premium_until
+  if (!user.me?.premium || !until) return null
+  return Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 86_400_000))
+})
+
+function toggleHidden() {
+  haptic.selection()
+  prefs.hideAmounts = !prefs.hideAmounts
+}
+
+const heroIncome = computed(() => amountFor(summary.value?.income, heroBalance.value.currency))
+const heroExpense = computed(() => amountFor(summary.value?.expense, heroBalance.value.currency))
+const overallBudget = computed(() => budgets.overall.find((b) => b.currency === heroBalance.value.currency))
+const budgetSheet = ref(false)
+// Only loaded when someone taps "Set a monthly limit": keeps it out of the first-load bundle.
+const BudgetSheet = defineAsyncComponent(() => import('@/components/BudgetSheet.vue'))
+
+const activeAccounts = computed(() => accounts.active)
+
+// Insight strip: today / this week from the last 7 days of spending, top category from the summary.
+const weekTxs = ref<Transaction[]>([])
+async function loadWeek() {
+  try {
+    const t = today()
+    const page = await api.listTransactions({ type: ['expense', 'installment'], from: weekStart(t), to: t, limit: 200 })
+    weekTxs.value = page.transactions
+  } catch {
+    weekTxs.value = []
+  }
+}
+const mainBreakdown = computed(() => breakdown.value.find((g) => g.currency === heroBalance.value.currency))
+const insights = computed(() => {
+  const cur = heroBalance.value.currency
+  const t = today()
+  const ws = weekStart(t)
+  const top = mainBreakdown.value?.rows[0]
+  return [
+    { key: 'today', label: t_('home.chip_today'), value: money(-sumSpent(weekTxs.value, cur, t, t), cur), color: '#ff6b5a', query: { type: 'expense,installment', currency: cur, from: t, to: t } },
+    { key: 'week', label: t_('home.chip_week'), value: money(-sumSpent(weekTxs.value, cur, ws, t), cur), color: '#f5a524', query: { type: 'expense,installment', currency: cur, from: ws, to: t } },
+    ...(top
+      ? [{ key: 'top', label: t_('home.chip_top'), value: `${categoryLabel(top.category)} ${top.share}%`, color: categoryStyle(top.category).color, query: { category_id: top.category_id, currency: cur, ...(range.value ?? {}) } }]
+      : []),
+  ]
+})
+
+// Donut: top 5 categories plus "other", in the hero currency.
+const donut = computed<DonutSlice[]>(() => {
+  const rows = mainBreakdown.value?.rows ?? []
+  const top = rows.slice(0, 5).map((r) => ({ key: r.category_id, value: r.amount_minor, color: categoryStyle(r.category).color, label: categoryLabel(r.category) }))
+  const rest = rows.slice(5).reduce((s, r) => s + r.amount_minor, 0)
+  return rest > 0 ? [...top, { key: 'other', value: rest, color: '#8b8aa0', label: t_('home.other') }] : top
+})
+const donutTotal = computed(() => (mainBreakdown.value?.rows ?? []).reduce((s, r) => s + r.amount_minor, 0))
+
+// Recent, grouped as Today / Yesterday / date.
+const recentGroups = computed(() => {
+  const out: { day: string; items: Transaction[] }[] = []
+  for (const tx of summary.value?.recent ?? []) {
+    const last = out[out.length - 1]
+    if (last?.day === tx.occurred_on) last.items.push(tx)
+    else out.push({ day: tx.occurred_on, items: [tx] })
+  }
+  return out
+})
+
 </script>
 
 <template>
-  <div class="px-4 pt-4">
-    <EmptyState v-if="failed && !summary" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="refresh" />
+  <PullIndicator :pull="pull" :refreshing="refreshing" :threshold="threshold" />
 
-    <template v-else-if="summary">
-      <!-- Balance per currency -->
-      <section class="mb-3 rounded-2xl bg-surface p-4" :aria-label="$t('home.balance')">
-        <h2 class="mb-1 text-sm text-hint">{{ $t('home.balance') }}</h2>
-        <button
-          v-for="b in balances"
-          :key="b.currency"
-          type="button"
-          class="pressable tabular block w-full truncate text-left text-3xl leading-tight font-bold"
-          @click="drill({ currency: b.currency }, false)"
-        >
-          {{ money(b.amount_minor, b.currency) }}
-        </button>
-      </section>
+  <!-- Skeleton -->
+  <div v-if="!summary && !failed" aria-busy="true">
+    <div class="hero-bg h-[25rem]" />
+    <div class="-mt-12 flex gap-3 overflow-hidden px-5">
+      <div class="skeleton h-40 w-[62%] shrink-0 rounded-[26px]" />
+      <div class="skeleton h-40 w-[62%] shrink-0 rounded-[26px]" />
+    </div>
+  </div>
 
-      <!-- Debts: only when something is open -->
-      <section v-if="debtTiles.length" class="mb-3 divide-y divide-separator rounded-2xl bg-surface">
+  <EmptyState v-else-if="failed && !summary" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" class="pt-20" @action="refresh" />
+
+  <template v-else-if="summary">
+    <!-- Full-bleed hero: runs under Telegram's (tinted) header -->
+    <section class="hero-bg relative overflow-hidden px-5 pt-3 pb-20 text-white" :aria-label="$t('home.balance')">
+      <span class="blob blob-1" aria-hidden="true" />
+      <span class="blob blob-2" aria-hidden="true" />
+      <span class="blob blob-3" aria-hidden="true" />
+
+      <div class="relative flex items-center justify-between">
+        <RouterLink :to="{ name: 'profile' }" class="pressable rounded-full" :aria-label="$t('tabs.profile')">
+          <UserAvatar :size="42" />
+        </RouterLink>
         <RouterLink
-          v-for="tile in debtTiles"
-          :key="tile.key"
-          :to="tile.to"
-          class="flex items-start justify-between gap-3 px-4 py-3 active:bg-page/60"
+          :to="{ name: 'premium' }"
+          class="pressable flex items-center gap-1.5 rounded-full bg-black/25 px-3 py-1.5 text-[11px] font-bold tracking-[0.1em] uppercase backdrop-blur"
         >
-          <span class="flex shrink-0 items-center gap-1 pt-0.5 text-sm text-hint">
-            <AppIcon :name="tile.icon" :size="14" />{{ $t(`home.${tile.key}`) }}
+          <AppIcon name="crown" :size="14" class="text-[#ffd36b]" />
+          {{ $t('premium.title') }}<template v-if="premiumDays"> · {{ $t('home.days_short', { n: premiumDays }) }}</template>
+        </RouterLink>
+      </div>
+
+      <div class="rise relative mt-6 text-center" style="--i: 0">
+        <p class="text-[11px] font-semibold tracking-[0.22em] text-white/70 uppercase">{{ $t('home.balance') }}</p>
+        <button type="button" class="pressable mx-auto block max-w-full" @click="drill({ currency: heroBalance.currency }, false)">
+          <span class="display block leading-tight whitespace-nowrap" :class="heroSize">{{ money(shownBalance, heroBalance.currency) }}</span>
+        </button>
+        <p v-for="b in otherBalances" :key="b.currency" class="display text-lg text-white/80">{{ money(b.amount_minor, b.currency) }}</p>
+        <button
+          type="button"
+          class="pressable mx-auto mt-3 flex size-10 items-center justify-center rounded-full bg-white text-[#5b3df5] shadow-lg"
+          :aria-label="prefs.hideAmounts ? $t('home.show_amounts') : $t('home.hide_amounts')"
+          :aria-pressed="prefs.hideAmounts"
+          @click="toggleHidden"
+        >
+          <AppIcon :name="prefs.hideAmounts ? 'eye-off' : 'eye'" :size="20" />
+        </button>
+      </div>
+
+      <!-- Monthly limit -->
+      <div class="rise relative mt-4 flex justify-center" style="--i: 1">
+        <RouterLink
+          v-if="overallBudget"
+          :to="{ name: 'plan' }"
+          class="pressable w-full max-w-[18rem] rounded-full bg-white px-4 py-2 text-[#17142b] shadow-lg"
+        >
+          <span class="mb-1 flex justify-between gap-2 text-xs font-semibold">
+            <span>{{ $t('home.limit') }}</span>
+            <span class="tabular text-[#8a87a0]">{{ money(overallBudget.spent_minor, overallBudget.currency, { bare: true }) }} / {{ money(overallBudget.amount_minor, overallBudget.currency) }}</span>
           </span>
-          <span class="flex min-w-0 items-center gap-1">
-            <span class="min-w-0 text-right">
-              <span
-                v-for="m in tile.list.filter((x) => x.amount_minor !== 0)"
-                :key="m.currency"
-                class="tabular block truncate font-semibold"
-              >
-                {{ money(m.amount_minor, m.currency) }}
-              </span>
-            </span>
-            <AppIcon name="chevron" :size="16" class="shrink-0 text-hint" />
+          <BudgetBar :spent="overallBudget.spent_minor" :limit="overallBudget.amount_minor" />
+        </RouterLink>
+        <button
+          v-else
+          type="button"
+          class="pressable flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#5b3df5] shadow-lg"
+          @click="budgetSheet = true"
+        >
+          <AppIcon name="target" :size="16" />{{ $t('home.set_limit') }}<AppIcon name="down" :size="16" />
+        </button>
+      </div>
+
+      <div class="rise relative mt-4 grid grid-cols-2 gap-3" style="--i: 2">
+        <!-- White on violet in both themes, so the text colour is fixed dark -->
+        <button type="button" class="pressable rounded-[20px] bg-white p-3 text-left text-[#17142b] shadow-lg" @click="drill({ type: 'income', currency: heroBalance.currency })">
+          <span class="flex items-center gap-2 text-xs text-[#8a87a0]">
+            <span class="flex size-7 items-center justify-center rounded-full bg-[#2bd9a0]/20 text-[#0f9e6e]"><AppIcon name="in" :size="15" /></span>
+            {{ $t('home.income') }}
+          </span>
+          <span class="display mt-1.5 block truncate text-[17px]">{{ money(heroIncome, heroBalance.currency, { signed: true, bare: true }) }}</span>
+        </button>
+        <button type="button" class="pressable rounded-[20px] bg-white p-3 text-left text-[#17142b] shadow-lg" @click="drill({ type: 'expense,installment', currency: heroBalance.currency })">
+          <span class="flex items-center gap-2 text-xs text-[#8a87a0]">
+            <span class="flex size-7 items-center justify-center rounded-full bg-[#ff6b5a]/20 text-[#e2483a]"><AppIcon name="out" :size="15" /></span>
+            {{ $t('home.expense') }}
+          </span>
+          <span class="display mt-1.5 block truncate text-[17px]">{{ money(-heroExpense, heroBalance.currency, { bare: true }) }}</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Big account cards, overlapping the hero -->
+    <div
+      class="relative -mt-12 flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-px-5 px-5 pb-3 [scrollbar-width:none]"
+      role="list"
+      :aria-label="$t('home.accounts')"
+    >
+      <AccountCard
+        v-for="(a, i) in activeAccounts"
+        :key="a.id"
+        :account="a"
+        big
+        role="listitem"
+        class="rise"
+        :style="{ '--i': i + 3 }"
+      />
+      <RouterLink
+        :to="{ name: 'account-new' }"
+        class="pressable rise flex h-40 w-28 shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-[26px] border-2 border-dashed border-accent/40 bg-surface/90 text-accent backdrop-blur"
+        role="listitem"
+        :style="{ '--i': activeAccounts.length + 3 }"
+      >
+        <AppIcon name="plus" :size="28" />
+        <span class="text-xs font-semibold">{{ $t('home.add_account') }}</span>
+      </RouterLink>
+    </div>
+
+    <div class="space-y-6 px-4 pt-2">
+      <!-- Insight strip -->
+      <div v-if="!isEmpty" class="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none]">
+        <button
+          v-for="(c, i) in insights"
+          :key="c.key"
+          type="button"
+          class="pressable rise flex shrink-0 items-center gap-2 rounded-full bg-surface py-2 pr-4 pl-2"
+          :style="{ '--i': i + 5, boxShadow: 'var(--shadow-card)' }"
+          @click="drill(c.query, false)"
+        >
+          <span class="size-6 rounded-full" :style="{ background: c.color }" aria-hidden="true" />
+          <span class="text-xs text-hint">{{ c.label }}</span>
+          <span class="text-sm font-bold whitespace-nowrap">{{ c.value }}</span>
+        </button>
+      </div>
+
+      <div v-if="debtTiles.length" class="flex gap-2 overflow-x-auto [scrollbar-width:none]">
+        <RouterLink v-for="tile in debtTiles" :key="tile.key" :to="tile.to" class="card pressable min-w-[10.5rem] flex-1 px-4 py-3">
+          <span class="eyebrow flex items-center gap-1"><AppIcon :name="tile.icon" :size="12" />{{ $t(`home.${tile.key}`) }}</span>
+          <span v-for="m in tile.list.filter((x) => x.amount_minor !== 0)" :key="m.currency" class="display mt-1 block text-base">
+            {{ money(m.amount_minor, m.currency) }}
           </span>
         </RouterLink>
-      </section>
+      </div>
 
-      <!-- This month: income / expense per currency -->
-      <section class="mb-3 rounded-2xl bg-surface p-4">
-        <h2 class="mb-3 text-sm text-hint first-letter:uppercase">
-          {{ $t('home.this_month') }} · {{ formatMonth(summary.month, lang) }}
-        </h2>
-        <div class="space-y-3">
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex items-center gap-1 pt-0.5 text-sm text-hint">
-              <AppIcon name="in" :size="16" class="text-income" />{{ $t('home.income') }}
-            </div>
-            <div class="min-w-0 text-right">
-              <button
-                v-for="c in monthCurrencies"
-                :key="c"
-                type="button"
-                class="pressable tabular block w-full truncate text-right text-lg font-semibold text-income"
-                @click="drill({ type: 'income', currency: c })"
-              >
-                {{ money(amountFor(summary.income, c), c, { signed: true }) }}
-              </button>
-            </div>
-          </div>
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex items-center gap-1 pt-0.5 text-sm text-hint">
-              <AppIcon name="out" :size="16" />{{ $t('home.expense') }}
-            </div>
-            <div class="min-w-0 text-right">
-              <button
-                v-for="c in monthCurrencies"
-                :key="c"
-                type="button"
-                class="pressable tabular block w-full truncate text-right text-lg font-semibold"
-                @click="drill({ type: 'expense', currency: c })"
-              >
-                {{ money(-amountFor(summary.expense, c), c) }}
-              </button>
-            </div>
-          </div>
-          <!-- Overall budget, compact; full card is on Plan -->
-          <RouterLink
-            v-for="b in budgets.overall"
-            :key="b.id"
-            :to="{ name: 'plan' }"
-            class="block"
-            :aria-label="`${$t('budgets.overall')} ${b.currency}`"
-          >
-            <span class="mb-1 flex justify-between gap-2 text-xs text-hint">
-              <span class="truncate">{{ $t('budgets.overall') }}</span>
-              <span class="tabular shrink-0">
-                {{ $t('budgets.spent_of', { spent: money(b.spent_minor, b.currency, { bare: true }), limit: money(b.amount_minor, b.currency) }) }}
-              </span>
-            </span>
-            <BudgetBar :spent="b.spent_minor" :limit="b.amount_minor" />
-          </RouterLink>
-        </div>
-      </section>
-
-      <RouterLink
-        v-if="planRow"
-        :to="{ name: 'plan' }"
-        class="card pressable mb-3 flex items-center gap-3 px-4 py-3"
-      >
-        <span class="text-xl" aria-hidden="true">🗓️</span>
-        <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ $t('mplan.home_row', planRow) }}</span>
+      <RouterLink v-if="planRow" :to="{ name: 'plan' }" class="card pressable flex items-center gap-3 px-4 py-3">
+        <span class="flex size-10 items-center justify-center rounded-full bg-accent-soft text-accent"><AppIcon name="calendar" :size="20" /></span>
+        <span class="min-w-0 flex-1 truncate font-semibold">{{ $t('mplan.home_row', planRow) }}</span>
         <AppIcon name="chevron" :size="16" class="shrink-0 text-hint" />
       </RouterLink>
 
-      <EmptyState
-        v-if="isEmpty"
-        icon="🧾"
-        :title="$t('home.empty_title')"
-        :body="$t('home.empty_body')"
-        :action="$t('home.empty_cta')"
-        @action="router.push({ name: 'tx-new', query: { type: 'expense' } })"
-      />
+      <div v-if="isEmpty" class="card">
+        <EmptyState
+          art="wallet"
+          :title="$t('home.empty_title')"
+          :body="$t('home.empty_body')"
+          :action="$t('home.empty_cta')"
+          @action="router.push({ name: 'tx-new', query: { type: 'expense' } })"
+        />
+      </div>
 
       <template v-else>
-        <!-- Category breakdown -->
-        <section class="mb-3 rounded-2xl bg-surface py-3">
-          <h2 class="mb-1 px-4 font-semibold">{{ $t('home.by_category') }}</h2>
-          <p v-if="!breakdown.length" class="px-4 py-2 text-sm text-hint">{{ $t('home.no_expenses') }}</p>
-          <div v-for="group in breakdown" :key="group.currency">
-            <button
-              v-for="row in group.rows"
-              :key="`${row.category_id}-${row.currency}`"
-              type="button"
-              class="block w-full px-4 py-2 text-left active:bg-page/60"
-              @click="drill({ category_id: row.category_id, currency: row.currency, type: 'expense' })"
-            >
-              <span class="flex items-center gap-2">
-                <span aria-hidden="true">{{ row.category?.icon }}</span>
-                <span class="min-w-0 flex-1 truncate text-sm">{{ categoryLabel(row.category) }}</span>
-                <span class="tabular text-xs text-hint">{{ row.share }}%</span>
-                <span class="tabular text-sm font-semibold whitespace-nowrap">{{ money(row.amount_minor, row.currency) }}</span>
-              </span>
-              <span class="mt-1.5 block h-2 overflow-hidden rounded-full bg-page">
-                <span class="block h-full rounded-full bg-accent" :style="{ width: `${row.width}%` }" />
-              </span>
-            </button>
+        <!-- Spending by category: donut -->
+        <section v-if="donut.length">
+          <h2 class="eyebrow mb-2 px-1">{{ $t('home.by_category') }} · {{ formatMonth(summary.month, lang) }}</h2>
+          <div class="card flex items-center gap-4 p-4">
+            <DonutChart :slices="donut" :size="132" :label="$t('home.by_category')">
+              <span class="text-[10px] text-hint uppercase">{{ $t('home.expense') }}</span>
+              <span class="display text-sm leading-tight">{{ money(donutTotal, heroBalance.currency, { bare: true }) }}</span>
+            </DonutChart>
+            <ul class="min-w-0 flex-1 space-y-1.5">
+              <li v-for="s in donut" :key="s.key">
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 text-left text-sm"
+                  :disabled="s.key === 'other'"
+                  @click="drill({ category_id: s.key, currency: heroBalance.currency, type: 'expense,installment' })"
+                >
+                  <span class="size-2.5 shrink-0 rounded-full" :style="{ background: s.color }" />
+                  <span class="min-w-0 flex-1 truncate">{{ s.label }}</span>
+                  <span class="tabular text-xs font-semibold text-hint">{{ donutTotal ? Math.round((s.value / donutTotal) * 100) : 0 }}%</span>
+                </button>
+              </li>
+            </ul>
           </div>
         </section>
 
-        <!-- Recent activity -->
-        <section class="rounded-2xl bg-surface py-2">
-          <div class="flex items-center justify-between px-4 py-1">
-            <h2 class="font-semibold">{{ $t('home.recent') }}</h2>
-            <RouterLink :to="{ name: 'activity' }" class="flex items-center text-sm text-link">
-              {{ $t('common.see_all') }}<AppIcon name="chevron" :size="16" />
+        <!-- Recent -->
+        <section>
+          <div class="mb-2 flex items-center justify-between px-1">
+            <h2 class="eyebrow">{{ $t('home.recent_long') }}</h2>
+            <RouterLink :to="{ name: 'activity' }" class="pressable flex items-center gap-0.5 rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent">
+              {{ $t('home.all') }}<AppIcon name="chevron" :size="14" />
             </RouterLink>
           </div>
-          <TxRow v-for="tx in summary.recent" :key="tx.id" :tx="tx" @open="openTx" />
+          <div class="space-y-3">
+            <div v-for="g in recentGroups" :key="g.day">
+              <p class="mb-1 px-1 text-xs font-semibold text-hint first-letter:uppercase">{{ dayLabel(g.day) }}</p>
+              <div class="card overflow-hidden py-1">
+                <TxRow v-for="tx in g.items" :key="tx.id" :tx="tx" @open="openTx" />
+              </div>
+            </div>
+          </div>
         </section>
       </template>
-    </template>
+    </div>
 
-    <div v-else class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
-  </div>
+    <BudgetSheet v-if="budgetSheet" v-model:open="budgetSheet" :budget="null" />
+  </template>
 </template>
+
+<style scoped>
+.hero-bg {
+  /* Bleeds under the safe area (App pads it) so the hero meets Telegram's tinted header. */
+  margin-top: calc(-1 * var(--safe-top));
+  padding-top: calc(var(--safe-top) + 0.75rem);
+  background: linear-gradient(165deg, #5b3df5 0%, #6a4bfa 55%, #7b5cff 100%);
+  border-bottom-left-radius: 32px;
+  border-bottom-right-radius: 32px;
+}
+.blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(28px);
+  pointer-events: none;
+}
+.blob-1 {
+  width: 220px;
+  height: 220px;
+  top: -60px;
+  right: -60px;
+  background: rgb(168 146 255 / 65%);
+}
+.blob-2 {
+  width: 200px;
+  height: 200px;
+  bottom: 40px;
+  left: -80px;
+  background: rgb(43 217 160 / 35%);
+}
+.blob-3 {
+  width: 140px;
+  height: 140px;
+  bottom: -30px;
+  right: 20%;
+  background: rgb(67 39 214 / 70%);
+}
+.rise {
+  animation: rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+}
+</style>

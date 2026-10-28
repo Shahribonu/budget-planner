@@ -74,7 +74,8 @@ function deactivate() {
   returnFocus = null
 }
 
-watch(open, (isOpen) => (isOpen ? activate() : deactivate()))
+// immediate: a lazily mounted sheet may already be open on its first render.
+watch(open, (isOpen, was) => (isOpen ? activate() : was && deactivate()), { immediate: true })
 onBeforeUnmount(() => open.value && deactivate())
 </script>
 

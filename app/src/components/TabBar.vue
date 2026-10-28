@@ -1,70 +1,91 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { haptic } from '@/lib/telegram'
+import { useToastStore } from '@/stores/toast'
 import AppIcon, { type IconName } from './AppIcon.vue'
 
-const left: { name: string; icon: IconName; label: string }[] = [
+const { t } = useI18n()
+const router = useRouter()
+const toast = useToastStore()
+
+const tabs: { name: string; icon: IconName; label: string }[] = [
   { name: 'home', icon: 'home', label: 'tabs.home' },
   { name: 'activity', icon: 'list', label: 'tabs.activity' },
-]
-const right: { name: string; icon: IconName; label: string }[] = [
   { name: 'plan', icon: 'target', label: 'tabs.plan' },
-  { name: 'insights', icon: 'chart', label: 'tabs.insights' },
   { name: 'profile', icon: 'user', label: 'tabs.profile' },
 ]
+
+// Capture button: tap adds a transaction; a long press hints at voice notes in the chat.
+let pressTimer: ReturnType<typeof setTimeout> | undefined
+let longPressed = false
+
+function pressStart() {
+  longPressed = false
+  pressTimer = setTimeout(() => {
+    longPressed = true
+    haptic.impact('heavy')
+    toast.show(t('tabs.voice_hint'))
+  }, 550)
+}
+
+function pressEnd() {
+  clearTimeout(pressTimer)
+}
+
+function go(navigate: (e?: MouseEvent) => unknown, e: MouseEvent) {
+  haptic.selection()
+  void navigate(e)
+}
+
+function capture() {
+  if (longPressed) return
+  haptic.impact('medium')
+  void router.push({ name: 'tx-new' })
+}
 </script>
 
 <template>
   <nav
-    class="fixed inset-x-0 bottom-0 z-20 border-t border-separator bg-bg"
-    :style="{ paddingBottom: 'var(--safe-bottom)' }"
+    class="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-4"
+    :style="{ paddingBottom: 'calc(var(--safe-bottom) + 12px)' }"
+    :aria-label="$t('tabs.nav')"
   >
-    <div class="mx-auto grid h-(--tabbar-h) max-w-xl grid-cols-6 items-center">
-      <RouterLink
-        v-for="tab in left"
-        :key="tab.name"
-        :to="{ name: tab.name }"
-        class="tab"
-        active-class="tab-active"
-        @click="haptic.selection()"
-      >
-        <AppIcon :name="tab.icon" :size="22" />
-        <span class="tab-label">{{ $t(tab.label) }}</span>
-      </RouterLink>
-      <div class="flex justify-center">
+    <div class="pointer-events-auto mx-auto flex max-w-xl items-center gap-3">
+      <div class="flex h-16 flex-1 items-center justify-around rounded-full bg-surface px-2" :style="{ boxShadow: 'var(--shadow-float)' }">
         <RouterLink
-          :to="{ name: 'tx-new' }"
-          class="pressable flex size-13 items-center justify-center rounded-full bg-accent text-on-accent shadow-lg"
-          :aria-label="$t('tabs.add')"
-          @click="haptic.impact('medium')"
+          v-for="tab in tabs"
+          :key="tab.name"
+          v-slot="{ isActive, isExactActive, navigate, href }"
+          :to="{ name: tab.name }"
+          custom
         >
-          <AppIcon name="plus" :size="28" />
+          <a
+            :href="href"
+            class="pressable flex size-12 items-center justify-center rounded-full transition-colors"
+            :class="(tab.name === 'home' ? isExactActive : isActive) ? 'bg-text text-surface' : 'text-hint'"
+            :aria-label="$t(tab.label)"
+            :aria-current="(tab.name === 'home' ? isExactActive : isActive) ? 'page' : undefined"
+            @click="(e: MouseEvent) => go(navigate, e)"
+          >
+            <AppIcon :name="tab.icon" :size="22" />
+          </a>
         </RouterLink>
       </div>
-      <RouterLink
-        v-for="tab in right"
-        :key="tab.name"
-        :to="{ name: tab.name }"
-        class="tab"
-        active-class="tab-active"
-        @click="haptic.selection()"
+      <button
+        type="button"
+        class="pressable flex size-16 shrink-0 items-center justify-center rounded-full bg-mint text-[#0b2b20]"
+        :style="{ boxShadow: '0 8px 24px rgb(43 217 160 / 45%)' }"
+        :aria-label="$t('tabs.add')"
+        @pointerdown="pressStart"
+        @pointerup="pressEnd"
+        @pointerleave="pressEnd"
+        @pointercancel="pressEnd"
+        @contextmenu.prevent
+        @click="capture"
       >
-        <AppIcon :name="tab.icon" :size="22" />
-        <span class="tab-label">{{ $t(tab.label) }}</span>
-      </RouterLink>
+        <AppIcon name="plus" :size="30" />
+      </button>
     </div>
   </nav>
 </template>
-
-<style scoped>
-@reference '../style.css';
-
-.tab {
-  @apply flex h-full min-w-0 flex-col items-center justify-center gap-0.5 text-hint;
-}
-.tab-active {
-  @apply text-accent;
-}
-.tab-label {
-  @apply w-full truncate px-0.5 text-center text-[10px] leading-tight font-medium;
-}
-</style>

@@ -288,7 +288,7 @@ const yesterday = computed(() => addDays(today(), -1))
   <EmptyState v-else-if="loadFailed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
 
   <div v-else-if="readOnly && original" class="px-4">
-    <div class="rounded-2xl bg-surface py-1"><TxRow :tx="original" /></div>
+    <div class="card py-1"><TxRow :tx="original" /></div>
     <p class="mt-3 px-1 text-sm text-hint">{{ $t('form.opening_readonly') }}</p>
   </div>
 

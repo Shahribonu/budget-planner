@@ -98,7 +98,19 @@ async function request<T>(method: string, path: string, opts: { query?: Query; b
   return data as T
 }
 
+/** The user's Telegram photo as a Blob, or null when there is none (404) or it can't be loaded. */
+async function getAvatar(): Promise<Blob | null> {
+  const auth = authHeader()
+  try {
+    const res = await fetch(buildUrl('/me/avatar'), { headers: auth ? { Authorization: auth } : {} })
+    return res.ok ? await res.blob() : null
+  } catch {
+    return null
+  }
+}
+
 export const api = {
+  getAvatar,
   getMe: () => request<User>('GET', '/me'),
   patchMe: (patch: UserPatch) => request<User>('PATCH', '/me', { body: patch }),
 

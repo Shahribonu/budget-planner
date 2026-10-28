@@ -1,5 +1,6 @@
 // Typed wrapper around the subset of window.Telegram.WebApp we use.
 // https://core.telegram.org/bots/webapps
+import { prefs } from './prefs'
 
 type ImpactStyle = 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'
 type NotificationType = 'error' | 'success' | 'warning'
@@ -15,6 +16,7 @@ interface BottomButton {
   hideProgress(): BottomButton
   onClick(cb: () => void): BottomButton
   offClick(cb: () => void): BottomButton
+  setParams?(params: { color?: string; text_color?: string }): BottomButton
 }
 
 interface BackButtonApi {
@@ -27,7 +29,7 @@ interface BackButtonApi {
 
 interface WebApp {
   initData: string
-  initDataUnsafe: { user?: { id: number; first_name: string; language_code?: string } }
+  initDataUnsafe: { user?: { id: number; first_name: string; language_code?: string; photo_url?: string } }
   platform: string
   colorScheme: 'light' | 'dark'
   isVersionAtLeast(version: string): boolean
@@ -36,6 +38,7 @@ interface WebApp {
   disableVerticalSwipes?(): void
   setHeaderColor?(color: string): void
   setBackgroundColor?(color: string): void
+  setBottomBarColor?(color: string): void
   showConfirm?(message: string, callback: (ok: boolean) => void): void
   openInvoice?(url: string, callback: (status: InvoiceStatus) => void): void
   onEvent(event: 'themeChanged', cb: () => void): void
@@ -75,18 +78,24 @@ export function init(): void {
   webApp.ready()
   webApp.expand()
   if (webApp.isVersionAtLeast('7.7')) webApp.disableVerticalSwipes?.()
-  if (webApp.isVersionAtLeast('6.1')) {
-    webApp.setHeaderColor?.('secondary_bg_color')
-    webApp.setBackgroundColor?.('secondary_bg_color')
-  }
   webApp.onEvent('themeChanged', applyColorScheme)
 }
 
-function applyColorScheme(): void {
+/** The user's Light/Dark override wins; "system" follows Telegram, or the OS outside it. */
+export function applyColorScheme(): void {
   const media = window.matchMedia('(prefers-color-scheme: dark)')
-  const scheme = inTelegram && webApp ? webApp.colorScheme : media.matches ? 'dark' : 'light'
-  document.documentElement.dataset.scheme = scheme
+  const system = inTelegram && webApp ? webApp.colorScheme : media.matches ? 'dark' : 'light'
+  const scheme = prefs.theme === 'system' ? system : prefs.theme
+  const root = document.documentElement
+  root.dataset.scheme = scheme
   if (!inTelegram) media.onchange = applyColorScheme
+  // Match Telegram's own header and background to the page (hex colours need 6.9+).
+  const page = getComputedStyle(root).getPropertyValue('--page').trim()
+  if (inTelegram && webApp && page && webApp.isVersionAtLeast('6.9')) {
+    webApp.setHeaderColor?.(page)
+    webApp.setBackgroundColor?.(page)
+    if (webApp.isVersionAtLeast('7.10')) webApp.setBottomBarColor?.(page)
+  }
 }
 
 // Handlers stack so an overlay (e.g. a sheet) can take over BackButton and hand
@@ -125,6 +134,9 @@ export const backButton = {
 export const mainButton = {
   available: inTelegram,
   bind(text: string, onClick: () => void): void {
+    // Our violet, never Telegram's default blue.
+    const brand = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() || '#5b3df5'
+    main?.setParams?.({ color: brand, text_color: '#ffffff' })
     main?.setText(text).onClick(onClick).show()
   },
   unbind(onClick: () => void): void {
@@ -171,4 +183,16 @@ export function openInvoice(url: string): Promise<InvoiceStatus> {
   const open = webApp?.openInvoice
   if (!canPay || !webApp || !open) return Promise.resolve('failed')
   return new Promise((resolve) => open.call(webApp, url, resolve))
+}
+
+/** Tint Telegram's header (e.g. violet behind the Home hero); null restores the page colour. */
+export function setHeaderTint(color: string | null): void {
+  if (!inTelegram || !webApp || !webApp.isVersionAtLeast('6.9')) return
+  if (color) webApp.setHeaderColor?.(color)
+  else applyColorScheme()
+}
+
+/** The user's Telegram profile photo, when the client shares it. */
+export function telegramPhotoUrl(): string | undefined {
+  return webApp?.initDataUnsafe.user?.photo_url
 }

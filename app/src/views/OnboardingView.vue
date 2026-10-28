@@ -138,7 +138,7 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
       </div>
 
       <h2 class="mb-2 text-sm font-medium text-hint">{{ $t('onboarding.language') }}</h2>
-      <div class="mb-6 overflow-hidden rounded-2xl bg-surface" role="radiogroup" :aria-label="$t('onboarding.language')">
+      <div class="mb-6 overflow-hidden card" role="radiogroup" :aria-label="$t('onboarding.language')">
         <button
           v-for="l in LANGUAGES"
           :key="l"
@@ -190,7 +190,7 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
       </div>
 
       <div class="space-y-3">
-        <div v-for="d in drafts" :key="d.uid" class="space-y-3 rounded-2xl bg-surface p-4">
+        <div v-for="d in drafts" :key="d.uid" class="space-y-3 card p-4">
           <div class="flex items-center gap-2">
             <span class="text-xl" aria-hidden="true">{{ ACCOUNT_ICONS[d.type] }}</span>
             <input

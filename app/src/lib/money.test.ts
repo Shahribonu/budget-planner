@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMoney, formatTyping, parseAmount, toInputValue } from './money'
+import { formatMoney, formatTyping, maskMoney, parseAmount, toInputValue } from './money'
 
 const N = ' '
 
@@ -108,5 +108,13 @@ describe('formatTyping', () => {
     expect(formatTyping('12,')).toBe('12,')
     expect(formatTyping('0012')).toBe('12')
     expect(formatTyping('12a3')).toBe('123')
+  })
+})
+
+describe('maskMoney', () => {
+  it('hides the number but keeps the currency', () => {
+    expect(maskMoney('UZS', 'uz-Latn')).toBe(`\u2022\u2022\u2022${N}\u2022\u2022\u2022${N}so'm`)
+    expect(maskMoney('USD', 'en')).toBe(`$\u2022\u2022\u2022${N}\u2022\u2022\u2022`)
+    expect(maskMoney('UZS', 'ru', { bare: true })).toBe(`\u2022\u2022\u2022${N}\u2022\u2022\u2022`)
   })
 })

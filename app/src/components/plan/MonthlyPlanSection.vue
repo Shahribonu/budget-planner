@@ -90,7 +90,7 @@ const examples = computed(() =>
 <template>
   <section class="space-y-3" :aria-label="$t('mplan.title')">
     <div class="flex items-center gap-1 px-1">
-      <h2 class="min-w-0 flex-1 truncate text-sm font-medium text-hint">{{ $t('mplan.title') }}</h2>
+      <h2 class="eyebrow min-w-0 flex-1 truncate">{{ $t('mplan.title') }}</h2>
       <template v-if="plan.view">
         <button type="button" class="pressable rounded-full p-1.5 text-link" :aria-label="$t('mplan.month_prev')" @click="shiftMonth(-1)">
           <AppIcon name="back" :size="18" />

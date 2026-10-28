@@ -59,19 +59,7 @@ function retryAfterPayment() {
 }
 const amountError = ref('')
 
-watch(open, (isOpen) => {
-  if (!isOpen) return
-  targetError.value = ''
-  amountError.value = ''
-  needsPremium.value = false
-  paymentPending.value = false
-  paid.value = false
-  const b = props.budget
-  currency.value = b?.currency ?? user.mainCurrency
-  amount.value = b ? toInputValue(b.amount_minor, b.currency) : ''
-  target.value = b ? (b.category_id === null ? OVERALL : String(b.category_id)) : null
-  if (!b) pickTarget()
-})
+
 
 /** Overall plus expense categories, minus those that already have a budget in this currency. */
 const targetOptions = computed(() => {
@@ -156,6 +144,21 @@ async function remove() {
 }
 
 const currencyOptions = CURRENCIES.map((c) => ({ value: c, label: c }))
+
+// Last, so everything it uses is defined when it runs immediately (sheet mounted already open).
+watch(open, (isOpen) => {
+  if (!isOpen) return
+  targetError.value = ''
+  amountError.value = ''
+  needsPremium.value = false
+  paymentPending.value = false
+  paid.value = false
+  const b = props.budget
+  currency.value = b?.currency ?? user.mainCurrency
+  amount.value = b ? toInputValue(b.amount_minor, b.currency) : ''
+  target.value = b ? (b.category_id === null ? OVERALL : String(b.category_id)) : null
+  if (!b) pickTarget()
+}, { immediate: true })
 </script>
 
 <template>
@@ -201,6 +204,9 @@ const currencyOptions = CURRENCIES.map((c) => ({ value: c, label: c }))
           </button>
         </template>
         <PremiumOffer v-else compact @paid="onPaid" />
+        <RouterLink :to="{ name: 'premium' }" class="block text-center text-sm font-medium text-link" @click="open = false">
+          {{ $t('premium.more') }}
+        </RouterLink>
         <p class="text-xs text-hint">{{ $t('premium.free_note') }}</p>
       </div>
 

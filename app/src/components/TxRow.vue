@@ -9,6 +9,7 @@ import { useCategoriesStore } from '@/stores/categories'
 import { useInstallmentsStore } from '@/stores/installments'
 import { amountSign } from '@/lib/transactions'
 import AppIcon, { type IconName } from './AppIcon.vue'
+import CategoryIcon from './CategoryIcon.vue'
 
 /** `dated`: lead the subtitle with the day, for lists not grouped by date (debt and plan history). */
 const props = defineProps<{ tx: Transaction; dated?: boolean }>()
@@ -89,22 +90,25 @@ const toAmount = computed(() =>
 <template>
   <button
     type="button"
-    class="flex w-full items-center gap-3 px-4 py-2.5 text-left active:bg-page/60"
+    class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-page/60"
     @click="$emit('open', tx)"
   >
-    <span class="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-page text-xl">
-      <span v-if="category" aria-hidden="true">{{ category.icon }}</span>
-      <AppIcon v-else :name="ICON[tx.type]" :size="20" class="text-hint" />
+    <span class="relative shrink-0">
+      <CategoryIcon v-if="category" :category="category" :size="44" />
+      <span v-else class="flex size-11 items-center justify-center rounded-full bg-accent-soft text-accent">
+        <AppIcon :name="ICON[tx.type]" :size="20" />
+      </span>
+      <!-- Direction badge: in/out is never shown by colour alone -->
       <span
         v-if="category"
-        class="absolute -right-0.5 -bottom-0.5 flex size-4.5 items-center justify-center rounded-full border-2 border-bg"
+        class="absolute -right-0.5 -bottom-0.5 flex size-4.5 items-center justify-center rounded-full border-2 border-surface"
         :class="sign === 'in' ? 'bg-income text-white' : 'bg-hint text-white'"
       >
         <AppIcon :name="ICON[tx.type]" :size="10" />
       </span>
     </span>
     <span class="min-w-0 flex-1">
-      <span class="block truncate font-medium">{{ title }}</span>
+      <span class="block truncate text-[15px] font-semibold">{{ title }}</span>
       <span v-if="subtitle" class="block truncate text-sm text-hint">{{ subtitle }}</span>
     </span>
     <span class="shrink-0 text-right">

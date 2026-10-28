@@ -42,6 +42,8 @@ export interface User {
   /** HH:MM in the user's time zone. */
   notify_time: string
   /** Active now, paid or trial (the API doesn't tell them apart). */
+  /** First contact with the bot or app. */
+  created_at: string
   premium: boolean
   premium_until: string | null
   trial_used: boolean
@@ -62,6 +64,12 @@ export interface Account {
   currency: Currency
   balance_minor: number
   archived: boolean
+  /** #RRGGBB; null lets the app choose by type. */
+  color: string | null
+  /** false leaves the account out of Summary.balances. */
+  include_in_total: boolean
+  /** Last 4 digits of the card. */
+  card_mask: string | null
 }
 
 export interface AccountCreate {
@@ -74,6 +82,9 @@ export interface AccountCreate {
 export interface AccountPatch {
   name?: string
   archived?: boolean
+  color?: string | null
+  include_in_total?: boolean
+  card_mask?: string | null
 }
 
 export interface Category {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { RouteLocationRaw } from 'vue-router'
 import type { PlanLine, PlanView } from '@/api/types'
 import { useFormat } from '@/composables/useFormat'
@@ -12,12 +13,34 @@ const props = defineProps<{ view: PlanView }>()
 
 const { money, lang } = useFormat()
 const showLines = ref(false)
+const expanded = ref(false)
 const editing = ref<PlanInputField>('income')
 const sheetOpen = ref(false)
 
 const cur = computed(() => props.view.currency)
 const inputs = computed(() => props.view.inputs)
 const result = computed(() => props.view.result)
+
+const { t } = useI18n()
+
+/** Income split into reserved / savings / everyday / free, as shares of income (what's left of 100% if over). */
+const split = computed(() => {
+  const i = inputs.value
+  const income = Math.max(i.income_minor, 1)
+  const parts = [
+    { key: 'reserved', label: t('mplan.reserved'), value: i.reserved_minor, color: 'var(--coral)' },
+    { key: 'savings', label: t('mplan.savings'), value: i.savings_minor, color: 'var(--amber)' },
+    { key: 'everyday', label: t('mplan.everyday'), value: i.buffer_minor, color: 'var(--brand)' },
+    { key: 'free', label: t('mplan.free'), value: Math.max(result.value.free_minor, 0), color: 'var(--mint)' },
+  ]
+  let used = 0
+  return parts.map((p) => {
+    const pct = Math.max(0, Math.min(100 - used, (p.value / income) * 100))
+    used += pct
+    return { ...p, pct }
+  })
+})
+const splitLabel = computed(() => split.value.map((s) => `${s.label} ${Math.round(s.pct)}%`).join(', '))
 
 const LINE_ICON: Record<PlanLine['kind'], string> = { recurring: '🔁', installment: '🛍️', debt: '🤝' }
 
@@ -35,7 +58,25 @@ function edit(field: PlanInputField) {
 </script>
 
 <template>
-  <section class="card divide-y divide-separator">
+  <section class="card divide-y divide-separator overflow-hidden">
+    <!-- Summary first: one big number and where the income goes; the rows open on tap -->
+    <button type="button" class="block w-full px-4 pt-4 pb-3 text-left" :aria-expanded="expanded" @click="expanded = !expanded">
+      <span class="eyebrow">{{ $t('mplan.free') }}</span>
+      <span class="flex items-baseline justify-between gap-2">
+        <span class="display text-[32px] leading-tight" :class="{ 'text-danger': result.free_minor < 0 }">{{ money(result.free_minor, cur) }}</span>
+        <AppIcon name="down" :size="18" class="shrink-0 text-hint transition-transform" :class="{ 'rotate-180': expanded }" />
+      </span>
+      <span class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-page" role="img" :aria-label="splitLabel">
+        <span v-for="seg in split" :key="seg.key" class="h-full" :style="{ width: `${seg.pct}%`, background: seg.color }" />
+      </span>
+      <span class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-hint">
+        <span v-for="seg in split" :key="seg.key" class="flex items-center gap-1">
+          <span class="size-2 rounded-full" :style="{ background: seg.color }" />{{ seg.label }}
+        </span>
+      </span>
+    </button>
+
+    <template v-if="expanded">
     <!-- Income -->
     <button type="button" class="row" @click="edit('income')">
       <span class="min-w-0 flex-1">
@@ -112,6 +153,8 @@ function edit(field: PlanInputField) {
       </div>
       <p class="mt-1 text-xs text-hint">{{ $t('mplan.cash_now', { amount: money(inputs.cash_now_minor, cur) }) }}</p>
     </div>
+
+    </template>
 
     <!-- No income known: the plan can't say much without it -->
     <div v-if="inputs.income_source === 'none'" class="space-y-2 bg-accent/10 px-4 py-3">

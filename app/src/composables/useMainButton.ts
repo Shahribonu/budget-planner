@@ -5,7 +5,12 @@ import { mainButton } from '@/lib/telegram'
  * Drives Telegram's MainButton while the calling component is mounted.
  * Returns `native`; when false the view renders its own in-page button.
  */
-export function useMainButton(text: Ref<string>, busy: Ref<boolean>, onClick: () => void, visible: Ref<boolean> = ref(true)) {
+export function useMainButton(
+  text: Readonly<Ref<string>>,
+  busy: Readonly<Ref<boolean>>,
+  onClick: () => void,
+  visible: Readonly<Ref<boolean>> = ref(true),
+) {
   const handler = () => {
     if (!busy.value && visible.value) onClick()
   }

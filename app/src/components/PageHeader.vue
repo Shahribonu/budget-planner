@@ -18,7 +18,7 @@ const goBack = useBack()
     >
       <AppIcon name="back" />
     </button>
-    <h1 class="min-w-0 flex-1 truncate text-xl font-bold">{{ title }}</h1>
+    <h1 class="display min-w-0 flex-1 truncate text-[26px]">{{ title }}</h1>
     <slot />
   </header>
 </template>

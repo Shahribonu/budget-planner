@@ -14,6 +14,7 @@ export default defineConfig({
     __VUE_I18N_FULL_INSTALL__: false,
     __INTLIFY_PROD_DEVTOOLS__: false,
     __VUE_PROD_DEVTOOLS__: false,
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? 'dev'),
   },
   server: {
     // Cloudflare quick tunnels, for opening the dev server inside Telegram.

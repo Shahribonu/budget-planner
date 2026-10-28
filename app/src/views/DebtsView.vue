@@ -99,7 +99,7 @@ const { native } = useMainButton(
         >
           <span class="flex items-center gap-3">
             <span
-              class="flex size-10 shrink-0 items-center justify-center rounded-full bg-page font-semibold text-hint uppercase"
+              class="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft font-bold text-accent uppercase"
               aria-hidden="true"
             >
               {{ d.counterparty.slice(0, 1) }}

@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import type { Budget, Currency, Installment } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import BudgetBar from '@/components/BudgetBar.vue'
+import BudgetRing from '@/components/BudgetRing.vue'
+import CategoryIcon from '@/components/CategoryIcon.vue'
 import BudgetSheet from '@/components/BudgetSheet.vue'
 import MonthlyPlanSection from '@/components/plan/MonthlyPlanSection.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -77,12 +79,12 @@ const soonest = computed<Installment | undefined>(() =>
 <template>
   <PageHeader :title="$t('plan.title')" />
 
-  <div class="space-y-3 px-4">
+  <div class="space-y-4 px-4">
     <MonthlyPlanSection />
 
     <!-- Budgets -->
     <div class="flex items-center justify-between px-1 pt-1">
-      <h2 class="text-sm font-medium text-hint">{{ $t('budgets.title') }}</h2>
+      <h2 class="eyebrow">{{ $t('budgets.title') }}</h2>
       <button
         v-if="budgets.all.length"
         type="button"
@@ -133,31 +135,31 @@ const soonest = computed<Installment | undefined>(() =>
       </p>
     </section>
 
-    <!-- Category budgets -->
-    <section v-if="budgets.byCategory.length" class="card overflow-hidden py-1">
-      <div v-for="b in budgets.byCategory" :key="b.id" class="flex items-center">
-        <button type="button" class="min-w-0 flex-1 px-4 py-2.5 text-left active:bg-page/60" @click="drill(b)">
-          <span class="flex items-center gap-2">
-            <span class="text-xl" aria-hidden="true">{{ categories.byId.get(b.category_id!)?.icon }}</span>
-            <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ categoryLabel(categories.byId.get(b.category_id!)) }}</span>
-            <span class="tabular shrink-0 text-xs text-hint">
-              {{ $t('budgets.spent_of', { spent: money(b.spent_minor, b.currency, { bare: true }), limit: money(b.amount_minor, b.currency) }) }}
-            </span>
+    <!-- Category budgets: rings in a 2-column grid -->
+    <section v-if="budgets.byCategory.length" class="grid grid-cols-2 gap-3">
+      <div v-for="b in budgets.byCategory" :key="b.id" class="card relative">
+        <button type="button" class="pressable flex w-full flex-col items-center gap-2 px-3 pt-4 pb-3 text-center" @click="drill(b)">
+          <BudgetRing :spent="b.spent_minor" :limit="b.amount_minor" />
+          <span class="flex max-w-full items-center gap-1.5">
+            <CategoryIcon :category="categories.byId.get(b.category_id!)" :size="20" />
+            <span class="truncate text-sm font-semibold">{{ categoryLabel(categories.byId.get(b.category_id!)) }}</span>
           </span>
-          <BudgetBar class="mt-1.5" :spent="b.spent_minor" :limit="b.amount_minor" />
+          <span class="tabular text-xs text-hint">
+            {{ money(b.spent_minor, b.currency, { bare: true }) }} / {{ money(b.amount_minor, b.currency) }}
+          </span>
         </button>
         <button
           type="button"
-          class="pressable mr-2 shrink-0 rounded-full p-2 text-hint"
+          class="pressable absolute top-1.5 right-1.5 rounded-full p-2 text-hint"
           :aria-label="`${$t('budgets.edit')}: ${categoryLabel(categories.byId.get(b.category_id!))}`"
           @click="openSheet(b)"
         >
-          <AppIcon name="edit" :size="16" />
+          <AppIcon name="edit" :size="14" />
         </button>
       </div>
     </section>
 
-    <h2 class="px-1 pt-3 text-sm font-medium text-hint">{{ $t('plan.debts_section') }}</h2>
+    <h2 class="eyebrow px-1 pt-3">{{ $t('plan.debts_section') }}</h2>
 
     <EmptyState v-if="failed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
 

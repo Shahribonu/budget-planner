@@ -3,34 +3,77 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Currency, Language, UserPatch } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
-import PageHeader from '@/components/PageHeader.vue'
-import PremiumOffer from '@/components/PremiumOffer.vue'
-import SegmentedControl from '@/components/SegmentedControl.vue'
+import BottomSheet from '@/components/BottomSheet.vue'
+import OptionSheet from '@/components/OptionSheet.vue'
+import SettingsRow from '@/components/SettingsRow.vue'
+import ToggleSwitch from '@/components/ToggleSwitch.vue'
 import { useFormat } from '@/composables/useFormat'
 import { LANGUAGES, setLanguage } from '@/i18n'
-import { ACCOUNT_ICONS } from '@/lib/accounts'
-import { formatDateNumeric } from '@/lib/dates'
+import { formatDateNumeric, formatMonth, todayISO } from '@/lib/dates'
+import { prefs, type Prefs } from '@/lib/prefs'
 import { CURRENCIES } from '@/lib/money'
-import { haptic } from '@/lib/telegram'
+import { haptic, telegramPhotoUrl } from '@/lib/telegram'
+import { useCategoriesStore } from '@/stores/categories'
 import { useAccountsStore } from '@/stores/accounts'
 import { useToastStore } from '@/stores/toast'
 import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
-const { money } = useFormat()
+const { lang } = useFormat()
+const categories = useCategoriesStore()
 const user = useUserStore()
 const accounts = useAccountsStore()
 const toast = useToastStore()
 
-const showArchived = ref(false)
-const archived = computed(() => accounts.all.filter((a) => a.archived))
+onMounted(() => {
+  void accounts.load(true).catch(() => toast.error())
+  void categories.load().catch(() => {})
+})
 
-onMounted(() => accounts.load(true).catch(() => toast.error()))
+const photo = telegramPhotoUrl()
+const initial = computed(() => (user.me?.first_name ?? '?').slice(0, 1).toUpperCase())
+const since = computed(() => (user.me?.created_at ? formatMonth(todayISO(user.me.timezone, new Date(user.me.created_at)).slice(0, 7), lang.value) : ''))
+const daysWithUs = computed(() => {
+  if (!user.me?.created_at) return 0
+  const start = todayISO(user.me.timezone, new Date(user.me.created_at))
+  const today = todayISO(user.me.timezone)
+  return Math.max(1, Math.round((Date.parse(today) - Date.parse(start)) / 86_400_000) + 1)
+})
+const stats = computed(() => [
+  { label: t('profile.stat_accounts'), value: accounts.active.length },
+  { label: t('profile.stat_categories'), value: categories.all.length },
+  { label: t('profile.stat_days'), value: daysWithUs.value },
+])
 
+const FLAGS: Record<Currency, string> = { UZS: '🇺🇿', USD: '🇺🇸' }
 const languageOptions = computed(() => LANGUAGES.map((l) => ({ value: l, label: t(`languages.${l}`) })))
-const currencyOptions = CURRENCIES.map((c) => ({ value: c, label: c }))
+const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label: c, icon: FLAGS[c], hint: t(`currencies.${c}`) })))
+const themeOptions = computed(() => (['system', 'light', 'dark'] as const).map((v) => ({ value: v, label: t(`profile.theme_${v}`) })))
+const styleOptions = computed(() => (['icons', 'emoji'] as const).map((v) => ({ value: v, label: t(`profile.style_${v}`) })))
 
-async function setLang(lang: Language) {
+// One sheet open at a time.
+type Sheet = 'language' | 'currency' | 'theme' | 'style' | 'notify' | 'about' | 'support' | 'privacy' | null
+const sheet = ref<Sheet>(null)
+const sheetOpen = (s: Exclude<Sheet, null>) => computed({ get: () => sheet.value === s, set: (v) => (sheet.value = v ? s : null) })
+const languageOpen = sheetOpen('language')
+const currencyOpen = sheetOpen('currency')
+const themeOpen = sheetOpen('theme')
+const styleOpen = sheetOpen('style')
+const notifyOpen = sheetOpen('notify')
+const aboutOpen = sheetOpen('about')
+const supportOpen = sheetOpen('support')
+const privacyOpen = sheetOpen('privacy')
+
+function setTheme(v: Prefs['theme'] | null) {
+  if (v) prefs.theme = v
+}
+function setStyle(v: Prefs['categoryStyle'] | null) {
+  if (v) prefs.categoryStyle = v
+}
+const version = __APP_VERSION__
+
+async function setLang(lang: Language | null) {
+  if (!lang) return
   const previous = user.language
   await setLanguage(lang)
   try {
@@ -42,7 +85,8 @@ async function setLang(lang: Language) {
   }
 }
 
-async function setCurrency(currency: Currency) {
+async function setCurrency(currency: Currency | null) {
+  if (!currency) return
   try {
     await user.update({ main_currency: currency })
     haptic.success()
@@ -78,8 +122,7 @@ async function saveReminder(patch: UserPatch, revert: () => void) {
   }
 }
 
-function toggleReminder(e: Event) {
-  const enabled = (e.target as HTMLInputElement).checked
+function toggleReminder(enabled: boolean) {
   const previous = notifyEnabled.value
   notifyEnabled.value = enabled
   void saveReminder({ notify_enabled: enabled }, () => (notifyEnabled.value = previous))
@@ -99,67 +142,87 @@ function changeReminderTime(e: Event) {
 </script>
 
 <template>
-  <PageHeader :title="user.me?.first_name ?? $t('profile.title')" />
-
-  <div class="space-y-4 px-4">
-    <section class="overflow-hidden rounded-2xl bg-surface">
-      <h2 class="px-4 pt-3 pb-1 text-sm font-medium text-hint">{{ $t('profile.accounts') }}</h2>
-      <RouterLink
-        v-for="a in [...accounts.active, ...(showArchived ? archived : [])]"
-        :key="a.id"
-        :to="{ name: 'account-edit', params: { id: a.id } }"
-        class="flex items-center gap-3 px-4 py-2.5 active:bg-page/60"
-        :class="{ 'opacity-60': a.archived }"
-      >
-        <span class="flex size-10 items-center justify-center rounded-full bg-page text-xl" aria-hidden="true">
-          {{ ACCOUNT_ICONS[a.type] }}
+  <div class="space-y-6 px-4 pt-6 pb-4">
+    <!-- Who -->
+    <header class="flex flex-col items-center text-center">
+      <span class="avatar-ring rounded-full p-1">
+        <img v-if="photo" :src="photo" alt="" class="size-24 rounded-full object-cover" />
+        <span v-else class="flex size-24 items-center justify-center rounded-full bg-accent text-4xl font-bold text-white" aria-hidden="true">
+          {{ initial }}
         </span>
+      </span>
+      <h1 class="display mt-3 text-2xl">{{ user.me?.first_name }}</h1>
+      <p v-if="user.me?.username" class="text-sm text-hint">@{{ user.me.username }}</p>
+      <p v-if="since" class="mt-1 text-xs text-hint">{{ $t('profile.since', { date: since }) }}</p>
+    </header>
+
+    <div class="grid grid-cols-3 gap-3">
+      <div v-for="s in stats" :key="s.label" class="card px-2 py-3 text-center">
+        <span class="display block text-2xl">{{ s.value }}</span>
+        <span class="block text-xs text-hint">{{ s.label }}</span>
+      </div>
+    </div>
+
+    <section>
+      <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_plan') }}</h2>
+      <RouterLink :to="{ name: 'premium' }" class="card pressable flex items-center gap-3 p-4">
+        <span class="premium-badge flex size-11 items-center justify-center rounded-full text-white"><AppIcon name="crown" :size="22" /></span>
         <span class="min-w-0 flex-1">
-          <span class="block truncate font-medium">{{ a.name }}</span>
-          <span class="block text-xs text-hint">
-            {{ $t(`account_types.${a.type}`) }}<template v-if="a.archived"> · {{ $t('profile.archived') }}</template>
+          <span class="block font-semibold">{{ $t('premium.title') }}</span>
+          <span class="block truncate text-sm text-hint">
+            {{ user.me?.premium && user.me.premium_until ? $t('premium.until', { date: formatDateNumeric(user.me.premium_until, user.me.timezone) }) : $t('premium.hero_sub') }}
           </span>
         </span>
-        <span class="tabular font-semibold whitespace-nowrap">{{ money(a.balance_minor, a.currency) }}</span>
-        <AppIcon name="chevron" :size="18" class="text-hint" />
+        <AppIcon name="chevron" :size="18" class="shrink-0 text-hint" />
       </RouterLink>
-      <RouterLink :to="{ name: 'account-new' }" class="flex items-center gap-3 px-4 py-3 text-link active:bg-page/60">
-        <span class="flex size-10 items-center justify-center rounded-full bg-page"><AppIcon name="plus" :size="20" /></span>
-        {{ $t('profile.add_account') }}
-      </RouterLink>
-      <button
-        v-if="archived.length"
-        type="button"
-        class="w-full border-t border-separator px-4 py-3 text-left text-sm text-hint"
-        :aria-pressed="showArchived"
-        @click="showArchived = !showArchived"
-      >
-        {{ $t('profile.show_archived') }} ({{ archived.length }})
-      </button>
     </section>
 
-    <section class="space-y-3 rounded-2xl bg-surface p-4">
-      <label class="flex items-center justify-between gap-3">
-        <span class="font-medium">{{ $t('profile.reminders') }}</span>
-        <input
-          type="checkbox"
-          role="switch"
-          class="peer sr-only"
-          :checked="notifyEnabled"
-          :aria-checked="notifyEnabled"
-          @change="toggleReminder"
+    <section>
+      <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_manage') }}</h2>
+      <div class="card divide-y divide-separator overflow-hidden">
+        <SettingsRow icon="card" :label="$t('profile.accounts')" :value="String(accounts.active.length)" :to="{ name: 'accounts' }" />
+        <SettingsRow icon="grid" tone="#f5a524" :label="$t('profile.categories')" :value="String(categories.all.length)" :to="{ name: 'categories' }" />
+        <SettingsRow icon="repeat" tone="#0f9e6e" :label="$t('mplan.regular')" :to="{ name: 'recurring' }" />
+      </div>
+    </section>
+
+    <section>
+      <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_app') }}</h2>
+      <div class="card divide-y divide-separator overflow-hidden">
+        <SettingsRow icon="cash" tone="#0f9e6e" :label="$t('profile.main_currency')" @click="sheet = 'currency'">
+          <span class="rounded-full bg-page px-2.5 py-1 text-sm font-medium">{{ FLAGS[user.mainCurrency] }} {{ user.mainCurrency }}</span>
+        </SettingsRow>
+        <SettingsRow icon="sun" tone="#f5a524" :label="$t('profile.theme')" :value="$t(`profile.theme_${prefs.theme}`)" @click="sheet = 'theme'" />
+        <SettingsRow icon="palette" tone="#ec4899" :label="$t('profile.category_style')" :value="$t(`profile.style_${prefs.categoryStyle}`)" @click="sheet = 'style'" />
+        <SettingsRow icon="globe" tone="#3b82f6" :label="$t('profile.language')" :value="$t(`languages.${user.language}`)" @click="sheet = 'language'" />
+        <SettingsRow
+          icon="bell"
+          tone="#ff6b5a"
+          :label="$t('profile.reminders')"
+          :value="notifyEnabled ? notifyTime : $t('profile.off')"
+          @click="sheet = 'notify'"
         />
-        <span
-          aria-hidden="true"
-          class="relative h-7 w-12 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent"
-          :class="notifyEnabled ? 'bg-accent' : 'bg-hint/40'"
-        >
-          <span
-            class="absolute top-0.5 left-0.5 size-6 rounded-full bg-white shadow transition-transform"
-            :class="{ 'translate-x-5': notifyEnabled }"
-          />
-        </span>
-      </label>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_about') }}</h2>
+      <div class="card divide-y divide-separator overflow-hidden">
+        <SettingsRow icon="info" tone="#8a87a0" :label="$t('profile.about')" :value="version" @click="sheet = 'about'" />
+        <SettingsRow icon="help" tone="#8a87a0" :label="$t('profile.support')" @click="sheet = 'support'" />
+        <SettingsRow icon="shield" tone="#8a87a0" :label="$t('profile.privacy')" @click="sheet = 'privacy'" />
+      </div>
+    </section>
+  </div>
+
+  <OptionSheet v-model:open="currencyOpen" :model-value="user.mainCurrency" :title="$t('profile.main_currency')" :options="currencyOptions" @update:model-value="setCurrency" />
+  <OptionSheet v-model:open="languageOpen" :model-value="user.language" :title="$t('profile.language')" :options="languageOptions" @update:model-value="setLang" />
+  <OptionSheet v-model:open="themeOpen" :model-value="prefs.theme" :title="$t('profile.theme')" :options="themeOptions" @update:model-value="setTheme" />
+  <OptionSheet v-model:open="styleOpen" :model-value="prefs.categoryStyle" :title="$t('profile.category_style')" :options="styleOptions" @update:model-value="setStyle" />
+
+  <BottomSheet v-model:open="notifyOpen" :title="$t('profile.reminders')">
+    <div class="space-y-4 px-4 pt-2 pb-6">
+      <ToggleSwitch :model-value="notifyEnabled" :label="$t('profile.reminders')" @update:model-value="toggleReminder" />
       <p class="text-sm text-hint">{{ $t('profile.reminders_hint') }}</p>
       <label class="flex items-center justify-between gap-3" :class="{ 'opacity-50': !notifyEnabled }">
         <span class="text-sm">{{ $t('profile.reminder_time') }}</span>
@@ -167,56 +230,32 @@ function changeReminderTime(e: Event) {
           type="time"
           :value="notifyTime"
           :disabled="!notifyEnabled"
-          class="tabular rounded-lg bg-page px-3 py-2 outline-none"
+          class="tabular rounded-xl bg-page px-3 py-2 outline-none"
           @change="changeReminderTime"
         />
       </label>
-    </section>
-
-    <section class="space-y-3 rounded-2xl bg-surface p-4">
-      <h2 class="text-sm font-medium text-hint">{{ $t('profile.settings') }}</h2>
-      <div>
-        <div class="mb-2 text-sm">{{ $t('profile.language') }}</div>
-        <div class="grid grid-cols-2 gap-2" role="radiogroup" :aria-label="$t('profile.language')">
-          <button
-            v-for="opt in languageOptions"
-            :key="opt.value"
-            type="button"
-            role="radio"
-            :aria-checked="user.language === opt.value"
-            class="pressable rounded-xl border-2 px-3 py-2 text-sm"
-            :class="user.language === opt.value ? 'border-accent' : 'border-transparent bg-page'"
-            @click="setLang(opt.value)"
-          >
-            {{ opt.label }}
-          </button>
-        </div>
-      </div>
-      <div>
-        <div class="mb-2 text-sm">{{ $t('profile.main_currency') }}</div>
-        <SegmentedControl
-          :model-value="user.mainCurrency"
-          :options="currencyOptions"
-          :label="$t('profile.main_currency')"
-          @update:model-value="setCurrency"
-        />
-      </div>
-    </section>
-
-    <section class="space-y-3 rounded-2xl bg-surface p-4" :aria-label="$t('premium.title')">
-      <h2 class="flex items-center gap-1.5 font-semibold">⭐ {{ $t('premium.title') }}</h2>
-      <!-- Trial and paid look the same in the API, so both just show the end date. -->
-      <template v-if="user.me?.premium">
-        <p v-if="user.me.premium_until" class="font-medium">
-          {{ $t('premium.until', { date: formatDateNumeric(user.me.premium_until, user.me.timezone) }) }}
-        </p>
-        <p class="text-sm text-hint">{{ $t('premium.active_thanks') }}</p>
-        <p class="text-xs text-hint">{{ $t('premium.manage_hint') }}</p>
-      </template>
-      <template v-else>
-        <p v-if="!user.me?.trial_used" class="rounded-xl bg-accent/10 px-3 py-2 text-sm">🎁 {{ $t('premium.trial_hint') }}</p>
-        <PremiumOffer />
-      </template>
-    </section>
-  </div>
+    </div>
+  </BottomSheet>
+  <BottomSheet v-model:open="aboutOpen" :title="$t('profile.about')">
+    <div class="space-y-2 px-4 pt-2 pb-6 text-sm">
+      <p>{{ $t('profile.about_body') }}</p>
+      <p class="text-hint">{{ $t('profile.version', { v: version }) }}</p>
+    </div>
+  </BottomSheet>
+  <BottomSheet v-model:open="supportOpen" :title="$t('profile.support')">
+    <p class="px-4 pt-2 pb-6 text-sm">{{ $t('profile.support_body') }}</p>
+  </BottomSheet>
+  <BottomSheet v-model:open="privacyOpen" :title="$t('profile.privacy')">
+    <p class="px-4 pt-2 pb-6 text-sm">{{ $t('profile.privacy_body') }}</p>
+  </BottomSheet>
 </template>
+
+<style scoped>
+.premium-badge {
+  background: linear-gradient(135deg, #7b62ff 0%, #4327d6 100%);
+}
+.avatar-ring {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--mint) 100%);
+  box-shadow: 0 8px 24px rgb(91 61 245 / 25%);
+}
+</style>

@@ -8,9 +8,11 @@ import type { Currency, Transaction, TransactionFilter, TransactionType } from '
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PullIndicator from '@/components/PullIndicator.vue'
 import OptionSheet, { type SheetOption } from '@/components/OptionSheet.vue'
 import TxRow from '@/components/TxRow.vue'
 import { useFormat } from '@/composables/useFormat'
+import { usePullToRefresh } from '@/composables/usePullToRefresh'
 import { categoryLabel } from '@/i18n'
 import { ACCOUNT_ICONS } from '@/lib/accounts'
 import { formatDay } from '@/lib/dates'
@@ -138,6 +140,8 @@ function reload() {
 watch(filter, reload, { deep: true })
 watch(() => ledger.revision, reload)
 
+const { pull, refreshing, threshold } = usePullToRefresh(async () => reload())
+
 const sentinel = ref<HTMLElement>()
 let observer: IntersectionObserver | undefined
 
@@ -259,9 +263,10 @@ function openTx(tx: Transaction) {
 </script>
 
 <template>
+  <PullIndicator :pull="pull" :refreshing="refreshing" :threshold="threshold" />
   <PageHeader :title="$t('activity.title')" />
 
-  <div class="sticky top-0 z-10 bg-page px-4 pt-1 pb-2" :style="{ top: 'var(--safe-top)' }">
+  <div class="sticky top-0 z-10 bg-canvas px-4 pt-1 pb-2" :style="{ top: 'var(--safe-top)' }">
     <label class="flex items-center gap-2 rounded-xl bg-surface px-3 py-2.5">
       <AppIcon name="search" :size="18" class="text-hint" />
       <input
@@ -302,21 +307,26 @@ function openTx(tx: Transaction) {
 
   <div class="px-4">
     <section v-for="g in groups" :key="g.date" class="mb-3">
-      <h2 class="px-1 pt-2 pb-1 text-sm font-medium text-hint first-letter:uppercase">{{ dayLabel(g.date) }}</h2>
-      <div class="overflow-hidden rounded-2xl bg-surface py-1">
+      <h2 class="eyebrow px-1 pt-2 pb-2">{{ dayLabel(g.date) }}</h2>
+      <div class="overflow-hidden card py-1">
         <TxRow v-for="tx in g.items" :key="tx.id" :tx="tx" @open="openTx" />
       </div>
     </section>
 
     <EmptyState
       v-if="!loading && !failed && items.length === 0"
-      icon="🔍"
+      art="search"
       :body="hasFilters ? $t('activity.empty_filtered') : $t('activity.empty')"
       :action="hasFilters ? $t('activity.clear') : undefined"
       @action="clearFilters"
     />
     <EmptyState v-if="failed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="loadPage(items.length === 0)" />
-    <div v-if="loading" class="py-6 text-center text-sm text-hint">{{ $t('common.loading') }}</div>
+    <div v-if="loading" class="card space-y-4 p-4" aria-busy="true">
+      <div v-for="i in (items.length ? 2 : 6)" :key="i" class="flex items-center gap-3">
+        <div class="skeleton size-11 rounded-full" />
+        <div class="flex-1 space-y-2"><div class="skeleton h-4 w-2/3" /><div class="skeleton h-3 w-1/3" /></div>
+      </div>
+    </div>
     <div ref="sentinel" class="h-px" />
   </div>
 

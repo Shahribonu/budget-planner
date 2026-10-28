@@ -127,3 +127,13 @@ export function formatTyping(input: string): string {
   const frac = s.slice(sep + 1).replace(/[.,]/g, '')
   return `${groupThousands(int || '0')}${s[sep]}${frac}`
 }
+
+// Small bullets: big-number display fonts draw ● as wide discs that overflow.
+const MASK = `\u2022\u2022\u2022${NNBSP}\u2022\u2022\u2022`
+
+/** A hidden amount ("••• ••• so'm"): same shape for every value, so nothing leaks through length. */
+export function maskMoney(currency: Currency, locale: Language, opts: FormatMoneyOptions = {}): string {
+  if (opts.bare) return MASK
+  if (currency === 'USD') return `$${MASK}`
+  return `${MASK}${NNBSP}${UZS_SUFFIX[locale]}`
+}
