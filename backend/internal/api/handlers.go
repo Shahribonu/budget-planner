@@ -29,6 +29,7 @@ type userJSON struct {
 	NotifyTime    string    `json:"notify_time"` // HH:MM in Timezone
 	CreatedAt     time.Time `json:"created_at"`
 	TermsAccepted bool      `json:"terms_accepted"`
+	VoiceEnabled  bool      `json:"voice_enabled"`
 }
 
 func clock(t pgtype.Time) string {
@@ -44,7 +45,7 @@ func (s *Server) userResponse(w http.ResponseWriter, r *http.Request, u dbq.User
 	}
 	writeJSON(w, http.StatusOK, userJSON{u.ID, u.TelegramID, u.FirstName, u.Username, u.Language, u.MainCurrency, u.Timezone, onboarded,
 		u.NotifyEnabled, clock(u.NotifyTime), u.CreatedAt,
-		u.TermsVersion != nil && *u.TermsVersion >= TermsVersion})
+		u.TermsVersion != nil && *u.TermsVersion >= TermsVersion, s.voiceEnabled()})
 }
 
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {

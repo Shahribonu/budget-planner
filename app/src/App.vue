@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, defineAsyncComponent, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ApiError } from '@/api/client'
 import AppToast from '@/components/AppToast.vue'
@@ -9,9 +9,13 @@ import TabBar from '@/components/TabBar.vue'
 import { useBack } from '@/composables/useBack'
 import { backButton } from '@/lib/telegram'
 import { useUserStore } from '@/stores/user'
+import { useVoiceStore } from '@/stores/voice'
 
 const route = useRoute()
 const user = useUserStore()
+const voice = useVoiceStore()
+// Loaded on the first mic tap; the recorder itself is created in that tap (see stores/voice).
+const VoiceSheet = defineAsyncComponent(() => import('@/components/VoiceSheet.vue'))
 const goBack = useBack()
 
 watch(
@@ -31,7 +35,7 @@ function retry() {
     class="mx-auto min-h-dvh max-w-xl"
     :style="{
       paddingTop: 'var(--safe-top)',
-      paddingBottom: route.meta.tabs ? 'calc(var(--safe-bottom) + var(--tabbar-h) + 16px)' : undefined,
+      paddingBottom: route.meta.tabs ? 'calc(var(--safe-bottom) + var(--tabbar-h) + var(--fab-stack) + 16px)' : undefined,
     }"
   >
     <EmptyState
@@ -47,4 +51,5 @@ function retry() {
   <TabBar v-if="route.meta.tabs && user.me" />
   <AppToast />
   <ConsentSheet v-if="user.me" />
+  <VoiceSheet v-if="voice.open" />
 </template>

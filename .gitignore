@@ -17,3 +17,4 @@ coverage.out
 node_modules/
 dist/
 deploy/backups/
+backend/clips/

@@ -18,6 +18,8 @@ import { useFormat } from '@/composables/useFormat'
 import { useMainButton } from '@/composables/useMainButton'
 import { categoryLabel } from '@/i18n'
 import { accountColor, darken } from '@/lib/accountStyle'
+import { LAST_ACCOUNT_KEY, chooseAccount, lastAccountId } from '@/lib/accounts'
+import { reviewOptions } from '@/lib/voiceReview'
 import { addDays } from '@/lib/dates'
 import { currencyLabel, formatMoney, parseAmount, toInputValue } from '@/lib/money'
 import { haptic } from '@/lib/telegram'
@@ -27,8 +29,8 @@ import { useCategoriesStore } from '@/stores/categories'
 import { useLedgerStore } from '@/stores/ledger'
 import { useToastStore } from '@/stores/toast'
 import { useUserStore } from '@/stores/user'
+import { useVoiceStore } from '@/stores/voice'
 
-const LAST_ACCOUNT_KEY = 'bp.lastAccount'
 const INPUT_TYPES: InputTransactionType[] = ['expense', 'income', 'transfer', 'exchange']
 
 const route = useRoute()
@@ -41,6 +43,7 @@ const accounts = useAccountsStore()
 const categories = useCategoriesStore()
 const ledger = useLedgerStore()
 const toast = useToastStore()
+const voice = useVoiceStore()
 
 const editId = route.name === 'tx-edit' ? Number(route.params.id) : null
 const queryType = route.query.type as InputTransactionType | undefined
@@ -103,17 +106,7 @@ const rate = computed(() => {
 
 function pickDefaultAccount() {
   if (accountId.value && accountOptions.value.some((a) => a.id === accountId.value)) return
-  let last: number | undefined
-  try {
-    last = Number(localStorage.getItem(LAST_ACCOUNT_KEY)) || undefined
-  } catch {
-    /* storage unavailable */
-  }
-  const preferred =
-    accounts.active.find((a) => a.id === last) ??
-    accounts.active.find((a) => a.currency === user.mainCurrency) ??
-    accounts.active[0]
-  accountId.value = preferred?.id ?? null
+  accountId.value = chooseAccount(accounts.active, { lastId: lastAccountId(), mainCurrency: user.mainCurrency })?.id ?? null
 }
 
 function fixDependents() {
@@ -140,6 +133,43 @@ function fill(tx: Transaction) {
   description.value = tx.description
 }
 
+// A suggestion from a voice note (VoiceSheet): prefilled, the user still taps Save.
+const heard = ref('')
+const reviewAmount = ref(false)
+const fromVoice = ref(false)
+// Flagged so'm amounts: "as heard" or × 1000; picking one (or typing) clears the flag.
+const amountPicks = ref<number[]>([])
+
+function pickAmount(minor: number) {
+  haptic.selection()
+  amount.value = toInputValue(minor, currency.value)
+  reviewAmount.value = false
+  delete errors.amount
+}
+
+function fillFromVoice(): boolean {
+  const p = route.query.voice ? voice.takePrefill() : null
+  if (!p) return false
+  const { item } = p
+  fromVoice.value = true
+  heard.value = p.text
+  reviewAmount.value = item.needs_review
+  amountPicks.value = reviewOptions(item)
+  type.value = item.type
+  amount.value = toInputValue(item.amount_minor, item.currency)
+  categoryId.value = item.category_id
+  date.value = item.occurred_on
+  description.value = item.description
+  accountId.value =
+    chooseAccount(accounts.active, {
+      currency: item.currency,
+      preferredId: item.account_id,
+      lastId: lastAccountId(),
+      mainCurrency: user.mainCurrency,
+    })?.id ?? null
+  return true
+}
+
 async function load() {
   loading.value = true
   loadFailed.value = false
@@ -155,7 +185,7 @@ async function load() {
       return
     }
     if (tx) fill(tx)
-    else pickDefaultAccount()
+    else if (!fillFromVoice()) pickDefaultAccount()
     loading.value = false
     fixDependents()
   } catch {
@@ -200,7 +230,7 @@ function buildInput(): TransactionInput | null {
     amount_minor: amountMinor ?? 0,
     account_id: accountId.value ?? 0,
     description: description.value.trim(),
-    source: original.value?.source ?? 'manual',
+    source: original.value?.source ?? (fromVoice.value ? 'voice' : 'manual'),
   }
   if (type.value === 'transfer' || type.value === 'exchange') {
     if (!toAccountId.value) errors.to_account = t('form.err_to_account')
@@ -312,15 +342,33 @@ function chipStyle(a: Account) {
   <form v-else class="space-y-5 px-4 pb-6" novalidate @submit.prevent="save">
     <SegmentedControl :model-value="type" :options="typeOptions" @update:model-value="setType" />
 
-    <AmountInput
-      v-model="amount"
-      :label="$t('form.amount')"
-      :unit="currencyLabel(currency, lang)"
-      :prefix="currency === 'USD'"
-      :error="errors.amount"
-      :autofocus="!editId"
-      @update:model-value="delete errors.amount"
-    />
+    <p v-if="heard" class="flex items-start gap-2 rounded-2xl bg-accent-soft px-3 py-2 text-sm text-accent">
+      <AppIcon name="mic" :size="16" class="mt-0.5 shrink-0" />{{ $t('voice.heard', { text: heard }) }}
+    </p>
+
+    <div :class="{ 'rounded-[24px] ring-2 ring-warning/70': reviewAmount }">
+      <AmountInput
+        v-model="amount"
+        :label="$t('form.amount')"
+        :unit="currencyLabel(currency, lang)"
+        :prefix="currency === 'USD'"
+        :error="errors.amount"
+        :autofocus="!editId && !fromVoice"
+        @update:model-value="delete errors.amount; reviewAmount = false"
+      />
+      <p v-if="reviewAmount" class="pb-2 text-center text-xs font-medium text-warning">{{ $t('voice.check_amount') }}</p>
+      <div v-if="reviewAmount && amountPicks.length" class="flex justify-center gap-2 pb-3" role="group" :aria-label="$t('voice.check_amount')">
+        <button
+          v-for="opt in amountPicks"
+          :key="opt"
+          type="button"
+          class="pressable rounded-full border-2 border-warning/60 bg-surface px-3 py-1 text-sm font-semibold"
+          @click="pickAmount(opt)"
+        >
+          {{ money(opt, currency) }}
+        </button>
+      </div>
+    </div>
 
     <section>
       <h2 class="field-label">{{ type === 'income' ? $t('form.income_account') : $t('form.account') }}</h2>

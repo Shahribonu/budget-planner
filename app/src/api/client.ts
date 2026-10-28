@@ -30,6 +30,7 @@ import type {
   TransactionPage,
   User,
   UserPatch,
+  VoiceResult,
 } from './types'
 
 export class ApiError extends Error {
@@ -65,18 +66,23 @@ function buildUrl(path: string, query?: Query): string {
   return `/api${path}${qs ? `?${qs}` : ''}`
 }
 
-async function request<T>(method: string, path: string, opts: { query?: Query; body?: unknown } = {}): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  opts: { query?: Query; body?: unknown; form?: FormData; quiet429?: boolean } = {},
+): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   const auth = authHeader()
   if (auth) headers.Authorization = auth
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
+  // FormData sets its own multipart Content-Type with the boundary.
+  if (opts.body !== undefined && !opts.form) headers['Content-Type'] = 'application/json'
 
   let res: Response
   try {
     res = await fetch(buildUrl(path, opts.query), {
       method,
       headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body: opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
     })
   } catch (e) {
     throw new ApiError(0, 'network', e instanceof Error ? e.message : 'Network error')
@@ -95,7 +101,7 @@ async function request<T>(method: string, path: string, opts: { query?: Query; b
     const retryAfter = Number(res.headers.get('Retry-After')) || undefined
     const error = new ApiError(res.status, err?.code ?? `http_${res.status}`, err?.message ?? res.statusText, err?.field, retryAfter)
     // Any endpoint may rate-limit: one friendly toast here, no automatic retry.
-    if (res.status === 429) onRateLimited?.(error)
+    if (res.status === 429 && !opts.quiet429) onRateLimited?.(error)
     throw error
   }
   return data as T
@@ -120,6 +126,13 @@ export function setRateLimitHandler(fn: (e: ApiError) => void): void {
 }
 
 export const api = {
+  /** Transcribes a recording into suggested transactions; saves nothing. The voice UI words its own 429. */
+  voice: (audio: Blob) => {
+    const form = new FormData()
+    form.append('audio', audio, 'voice.wav')
+    return request<VoiceResult>('POST', '/voice', { form, quiet429: true })
+  },
+
   /** 202: the bot sends a CSV and a JSON to the user's chat. 409 bot_blocked, 429 rate_limited. */
   exportData: () => request<{ sent: boolean }>('POST', '/me/export'),
   /** Permanently deletes the user and all their data (204). */

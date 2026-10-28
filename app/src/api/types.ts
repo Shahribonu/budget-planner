@@ -45,6 +45,8 @@ export interface User {
   created_at: string
   /** Terms and Privacy Policy accepted (onboarding or the one-time consent sheet). */
   terms_accepted: boolean
+  /** POST /voice works; when false the mic button says voice is coming soon. */
+  voice_enabled: boolean
 }
 
 export interface UserPatch {
@@ -416,3 +418,21 @@ export interface RecurringPatch {
 }
 
 
+
+export interface VoiceItem {
+  type: 'expense' | 'income'
+  amount_minor: number
+  currency: Currency
+  description: string
+  category_id: number
+  /** Account last used for this description. */
+  account_id: number | null
+  occurred_on: string
+  /** Amount is probably shorthand ("taksi 25"): highlight it. */
+  needs_review: boolean
+}
+
+export interface VoiceResult {
+  text: string
+  items: VoiceItem[]
+}

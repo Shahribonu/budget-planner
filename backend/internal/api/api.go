@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/auth"
+	"github.com/Shahribonu/budget-planner/backend/internal/capture"
+	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
 	"github.com/Shahribonu/budget-planner/backend/internal/planning"
@@ -36,6 +38,10 @@ type Config struct {
 	Telegram *telegram.Client
 	// StaticDir, when set, serves the built Mini App (app/dist) at /.
 	StaticDir string
+	// Voice and Capture turn Mini App recordings into suggested transactions;
+	// POST /api/voice answers 503 while either is unset or Voice is stt.None.
+	Voice   stt.Transcriber
+	Capture *capture.Service
 }
 
 type Server struct {
@@ -49,13 +55,16 @@ type Server struct {
 	// authFails counts failed logins per IP. Mobile carriers put many users behind
 	// one address, so only failures are limited by IP; requests are limited per user.
 	authFails, userLimit *limiter
-	users                *userCache
+	// voiceLimit caps paid transcriptions per user.
+	voiceLimit *limiter
+	users      *userCache
 }
 
 func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 	l := ledger.New(pool)
 	s := &Server{cfg: cfg, pool: pool, q: dbq.New(pool), ledger: l, plan: planning.NewService(pool, l), now: time.Now,
-		authFails: newLimiter(1, 20), userLimit: newLimiter(10, 30), users: newUserCache()}
+		authFails: newLimiter(1, 20), userLimit: newLimiter(10, 30),
+		voiceLimit: newLimiter(0.2, 5), users: newUserCache()}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, requestLog, middleware.Recoverer, securityHeaders)
@@ -65,48 +74,52 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 	}
 
 	r.Route("/api", func(r chi.Router) {
-		r.Use(limitBody, s.authenticate, s.limitUser)
-		r.Get("/me", s.getMe)
-		r.Patch("/me", s.patchMe)
-		r.Delete("/me", s.deleteMe)
-		r.Post("/me/export", s.exportData)
-		r.Get("/me/avatar", s.avatar)
-		r.Get("/accounts", s.listAccounts)
-		r.Post("/accounts", s.createAccount)
-		r.Patch("/accounts/{id}", s.patchAccount)
-		r.Get("/categories", s.listCategories)
-		r.Get("/transactions", s.listTransactions)
-		r.Post("/transactions", s.createTransaction)
-		r.Get("/transactions/{id}", s.getTransaction)
-		r.Put("/transactions/{id}", s.putTransaction)
-		r.Delete("/transactions/{id}", s.deleteTransaction)
-		r.Post("/transactions/{id}/restore", s.restoreTransaction)
-		r.Get("/summary", s.summary)
-		r.Get("/debts", s.listDebts)
-		r.Post("/debts", s.createDebt)
-		r.Get("/debts/{id}", s.getDebt)
-		r.Patch("/debts/{id}", s.patchDebt)
-		r.Delete("/debts/{id}", s.deleteDebt)
-		r.Post("/debts/{id}/payments", s.payDebt)
-		r.Get("/installments", s.listPlans)
-		r.Post("/installments", s.createPlan)
-		r.Get("/installments/{id}", s.getPlan)
-		r.Delete("/installments/{id}", s.deletePlan)
-		r.Post("/installments/{id}/payments", s.payPlan)
-		r.Get("/budgets", s.listBudgets)
-		r.Post("/budgets", s.createBudget)
-		r.Patch("/budgets/{id}", s.patchBudget)
-		r.Delete("/budgets/{id}", s.deleteBudget)
-		r.Get("/plan", s.getPlanView)
-		r.Patch("/plan", s.patchPlanView)
-		r.Post("/plan/items", s.addPlanItems)
-		r.Post("/plan/parse", s.parsePlanText)
-		r.Patch("/plan/items/{id}", s.patchPlanItem)
-		r.Delete("/plan/items/{id}", s.deletePlanItem)
-		r.Get("/recurring", s.listRecurring)
-		r.Post("/recurring", s.createRecurring)
-		r.Patch("/recurring/{id}", s.patchRecurring)
-		r.Delete("/recurring/{id}", s.deleteRecurring)
+		r.Use(s.authenticate, s.limitUser)
+		r.With(limitBody(maxVoiceBytes+64<<10)).Post("/voice", s.transcribeVoice)
+		r.Group(func(r chi.Router) {
+			r.Use(limitBody(64 << 10))
+			r.Get("/me", s.getMe)
+			r.Patch("/me", s.patchMe)
+			r.Delete("/me", s.deleteMe)
+			r.Post("/me/export", s.exportData)
+			r.Get("/me/avatar", s.avatar)
+			r.Get("/accounts", s.listAccounts)
+			r.Post("/accounts", s.createAccount)
+			r.Patch("/accounts/{id}", s.patchAccount)
+			r.Get("/categories", s.listCategories)
+			r.Get("/transactions", s.listTransactions)
+			r.Post("/transactions", s.createTransaction)
+			r.Get("/transactions/{id}", s.getTransaction)
+			r.Put("/transactions/{id}", s.putTransaction)
+			r.Delete("/transactions/{id}", s.deleteTransaction)
+			r.Post("/transactions/{id}/restore", s.restoreTransaction)
+			r.Get("/summary", s.summary)
+			r.Get("/debts", s.listDebts)
+			r.Post("/debts", s.createDebt)
+			r.Get("/debts/{id}", s.getDebt)
+			r.Patch("/debts/{id}", s.patchDebt)
+			r.Delete("/debts/{id}", s.deleteDebt)
+			r.Post("/debts/{id}/payments", s.payDebt)
+			r.Get("/installments", s.listPlans)
+			r.Post("/installments", s.createPlan)
+			r.Get("/installments/{id}", s.getPlan)
+			r.Delete("/installments/{id}", s.deletePlan)
+			r.Post("/installments/{id}/payments", s.payPlan)
+			r.Get("/budgets", s.listBudgets)
+			r.Post("/budgets", s.createBudget)
+			r.Patch("/budgets/{id}", s.patchBudget)
+			r.Delete("/budgets/{id}", s.deleteBudget)
+			r.Get("/plan", s.getPlanView)
+			r.Patch("/plan", s.patchPlanView)
+			r.Post("/plan/items", s.addPlanItems)
+			r.Post("/plan/parse", s.parsePlanText)
+			r.Patch("/plan/items/{id}", s.patchPlanItem)
+			r.Delete("/plan/items/{id}", s.deletePlanItem)
+			r.Get("/recurring", s.listRecurring)
+			r.Post("/recurring", s.createRecurring)
+			r.Patch("/recurring/{id}", s.patchRecurring)
+			r.Delete("/recurring/{id}", s.deleteRecurring)
+		})
 	})
 	if cfg.StaticDir != "" {
 		r.Handle("/*", staticApp(cfg.StaticDir))
@@ -202,11 +215,13 @@ func languageFor(code string) string {
 
 // ---- helpers ----
 
-func limitBody(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		next.ServeHTTP(w, r)
-	})
+func limitBody(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // requestLog logs method, route and status only — never bodies, which hold financial data.

@@ -62,6 +62,47 @@ paths:
         "409": { description: "bot_blocked: the user never started the bot or blocked it", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "429": { description: "rate_limited: an export was sent within the last 10 minutes", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  /voice:
+    post:
+      summary: "Transcribe a voice recording and suggest transactions from it. Saves nothing: open the suggestions in the form for the user to confirm. At most 5 in a burst, then one per 5 seconds."
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio: { type: string, format: binary, description: "At most 2 MB and 60 s. The part's Content-Type must be audio/wav (16 kHz mono PCM recommended), audio/ogg, audio/mp4 or audio/mpeg." }
+      responses:
+        "200":
+          description: "What was heard, and one suggestion per amount found (empty when none)"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text, items]
+                properties:
+                  text: { type: string }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [type, amount_minor, currency, description, category_id, account_id, occurred_on, needs_review]
+                      properties:
+                        type: { type: string, enum: [expense, income] }
+                        amount_minor: { type: integer, format: int64 }
+                        currency: { type: string, enum: [UZS, USD] }
+                        description: { type: string }
+                        category_id: { type: integer, format: int64 }
+                        account_id: { type: [integer, "null"], format: int64, description: "Account last used for this description" }
+                        occurred_on: { type: string, format: date }
+                        needs_review: { type: boolean, description: "Amount is probably shorthand (\"taksi 25\"); highlight it" }
+        "400": { description: "invalid: missing, too large, too long or unsupported audio", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: rate_limited, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { description: "voice_failed: the recording could not be recognized", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "voice_unavailable: no speech-to-text provider configured", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /me/avatar:
     get:
       summary: "The user's Telegram profile photo (JPEG), proxied. Use it when initDataUnsafe.user.photo_url is missing; fetch with the auth header and show via an object URL. 404 when there is no photo or privacy hides it."
@@ -589,7 +630,7 @@ components:
 
     User:
       type: object
-      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, created_at, terms_accepted]
+      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, created_at, terms_accepted, voice_enabled]
       properties:
         id: { type: integer, format: int64 }
         telegram_id: { type: integer, format: int64 }
@@ -603,6 +644,7 @@ components:
         notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: "HH:MM, local time of the evening summary" }
         created_at: { type: string, format: date-time, description: First contact with the bot or app ("with us since") }
         terms_accepted: { type: boolean, description: "Accepted the current version of the terms and privacy policy; when false, ask before continuing" }
+        voice_enabled: { type: boolean, description: "POST /voice works; when false, the mic button says voice is coming soon" }
 
     Account:
       type: object

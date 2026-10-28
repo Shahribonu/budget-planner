@@ -141,6 +141,35 @@ func (s *Service) Capture(ctx context.Context, u dbq.User, text, source, ref str
 	return out, nil
 }
 
+// Suggest parses and categorizes text like Capture but saves nothing: the Mini App
+// shows the items in its form for the user to confirm. AccountID is the account
+// remembered for the description, or 0.
+func (s *Service) Suggest(ctx context.Context, u dbq.User, text string) ([]Item, error) {
+	items := normalizer.Parse(text, normalizer.Options{DefaultCurrency: currencyOf(u), Now: s.now().In(s.loc(u))})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	cats, err := s.categories(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	income := strings.HasPrefix(strings.TrimSpace(text), "+")
+	out := make([]Item, len(items))
+	for i, it := range items {
+		out[i] = Item{
+			Type:        ledger.Expense,
+			AmountMinor: it.Amount.Minor,
+			Currency:    string(it.Amount.Currency),
+			Description: it.Description,
+			OccurredOn:  it.Date.Format(time.DateOnly),
+			Pattern:     categorize.Pattern(it.Description),
+			NeedsReview: it.NeedsReview,
+		}
+		out[i].AccountID = s.categorize(ctx, u, &out[i], cats, income)
+	}
+	return out, nil
+}
+
 func currencyOf(u dbq.User) money.Currency { return money.Currency(u.MainCurrency) }
 
 type categorySet struct {

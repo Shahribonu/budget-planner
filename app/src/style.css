@@ -83,6 +83,7 @@
   --safe-top: max(env(safe-area-inset-top), calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)));
   --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
   --tabbar-h: 84px; /* floating nav + its margin */
+  --fab-stack: 64px; /* the + stacked above the mic (52px + 12px gap) */
 }
 
 html,

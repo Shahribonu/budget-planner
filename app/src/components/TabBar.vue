@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { haptic } from '@/lib/telegram'
-import { useToastStore } from '@/stores/toast'
+import { useVoiceStore } from '@/stores/voice'
 import AppIcon, { type IconName } from './AppIcon.vue'
 
-const { t } = useI18n()
 const router = useRouter()
-const toast = useToastStore()
 
 const tabs: { name: string; icon: IconName; label: string }[] = [
   { name: 'home', icon: 'home', label: 'tabs.home' },
@@ -16,22 +13,7 @@ const tabs: { name: string; icon: IconName; label: string }[] = [
   { name: 'profile', icon: 'user', label: 'tabs.profile' },
 ]
 
-// Capture button: tap adds a transaction; a long press hints at voice notes in the chat.
-let pressTimer: ReturnType<typeof setTimeout> | undefined
-let longPressed = false
-
-function pressStart() {
-  longPressed = false
-  pressTimer = setTimeout(() => {
-    longPressed = true
-    haptic.impact('heavy')
-    toast.show(t('tabs.voice_hint'))
-  }, 550)
-}
-
-function pressEnd() {
-  clearTimeout(pressTimer)
-}
+const voice = useVoiceStore()
 
 function go(navigate: (e?: MouseEvent) => unknown, e: MouseEvent) {
   haptic.selection()
@@ -39,7 +21,6 @@ function go(navigate: (e?: MouseEvent) => unknown, e: MouseEvent) {
 }
 
 function capture() {
-  if (longPressed) return
   haptic.impact('medium')
   void router.push({ name: 'tx-new' })
 }
@@ -51,8 +32,12 @@ function capture() {
     :style="{ paddingBottom: 'calc(var(--safe-bottom) + 12px)' }"
     :aria-label="$t('tabs.nav')"
   >
-    <div class="pointer-events-auto mx-auto flex max-w-xl items-center gap-3">
-      <div class="flex h-16 flex-1 items-center justify-around rounded-full bg-surface px-2" :style="{ boxShadow: 'var(--shadow-float)' }">
+    <!-- items-end: the + lines up with the bar; the mic floats above it in the same column -->
+    <div class="mx-auto flex max-w-xl items-end gap-3">
+      <div
+        class="pointer-events-auto flex h-16 flex-1 items-center justify-around rounded-full bg-surface px-2"
+        :style="{ boxShadow: 'var(--shadow-float)' }"
+      >
         <RouterLink
           v-for="tab in tabs"
           :key="tab.name"
@@ -72,20 +57,28 @@ function capture() {
           </a>
         </RouterLink>
       </div>
-      <button
-        type="button"
-        class="pressable flex size-16 shrink-0 items-center justify-center rounded-full bg-mint text-[#0b2b20]"
-        :style="{ boxShadow: '0 8px 24px rgb(43 217 160 / 45%)' }"
-        :aria-label="$t('tabs.add')"
-        @pointerdown="pressStart"
-        @pointerup="pressEnd"
-        @pointerleave="pressEnd"
-        @pointercancel="pressEnd"
-        @contextmenu.prevent
-        @click="capture"
-      >
-        <AppIcon name="plus" :size="30" />
-      </button>
+      <div class="flex shrink-0 flex-col items-center gap-3">
+        <!-- Secondary: type a transaction by hand -->
+        <button
+          type="button"
+          class="pressable pointer-events-auto flex size-13 items-center justify-center rounded-full bg-accent text-white"
+          :style="{ boxShadow: '0 6px 18px rgb(91 61 245 / 35%)' }"
+          :aria-label="$t('tabs.add')"
+          @click="capture"
+        >
+          <AppIcon name="plus" :size="24" />
+        </button>
+        <!-- Primary: voice note, in line with the bar -->
+        <button
+          type="button"
+          class="pressable pointer-events-auto flex size-16 items-center justify-center rounded-full bg-mint text-[#0b2b20]"
+          :style="{ boxShadow: '0 8px 24px rgb(43 217 160 / 45%)' }"
+          :aria-label="$t('voice.mic')"
+          @click="voice.begin()"
+        >
+          <AppIcon name="mic" :size="28" />
+        </button>
+      </div>
     </div>
   </nav>
 </template>

@@ -203,7 +203,7 @@ function categoryOf(d: Draft) {
     <!-- Sticky input above the tab bar while the plan section is on screen -->
     <form
       class="sticky z-10 flex items-center gap-2 card p-2 shadow-lg ring-1 ring-separator"
-      :style="{ bottom: 'calc(var(--safe-bottom) + var(--tabbar-h) + 8px)' }"
+      :style="{ bottom: 'calc(var(--safe-bottom) + var(--tabbar-h) + var(--fab-stack) + 8px)' }"
       @submit.prevent="parse"
     >
       <input

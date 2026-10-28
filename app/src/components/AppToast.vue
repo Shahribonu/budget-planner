@@ -16,7 +16,7 @@ const toast = useToastStore()
       :key="toast.current.id"
       role="status"
       class="fixed inset-x-3 z-30 mx-auto flex max-w-md items-center gap-3 rounded-xl bg-neutral-900/95 px-4 py-3 text-sm text-white shadow-xl"
-      :style="{ bottom: 'calc(var(--safe-bottom) + var(--tabbar-h) + 12px)' }"
+      :style="{ bottom: 'calc(var(--safe-bottom) + var(--tabbar-h) + var(--fab-stack) + 12px)' }"
     >
       <span class="flex-1">{{ toast.current.message }}</span>
       <button
