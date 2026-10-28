@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { formatTyping } from '@/lib/money'
 
 defineProps<{ unit: string; prefix?: boolean; label: string; error?: string; autofocus?: boolean }>()
@@ -14,6 +14,12 @@ function onInput(e: Event) {
   if (el.value !== formatted) el.value = formatted
 }
 
+// Big, but stepped down so long amounts still fit a narrow card.
+const sizeClass = computed(() => {
+  const n = model.value.length
+  return n > 11 ? 'text-[30px]' : n > 8 ? 'text-[36px]' : 'text-[44px]'
+})
+
 defineExpose({ focus: () => input.value?.focus() })
 </script>
 
@@ -21,10 +27,9 @@ defineExpose({ focus: () => input.value?.focus() })
   <label class="block">
     <span class="sr-only">{{ label }}</span>
     <span
-      class="flex items-baseline justify-center gap-2 border-b-2 px-2 pb-2"
-      :class="error ? 'border-danger' : 'border-separator focus-within:border-accent'"
+      class="flex items-center justify-center gap-2 rounded-[22px] px-3 py-3 transition-colors"
+      :class="error ? 'bg-danger/8 ring-2 ring-danger' : 'focus-within:ring-2 focus-within:ring-accent/40'"
     >
-      <span v-if="prefix" class="text-3xl font-semibold text-hint">{{ unit }}</span>
       <input
         ref="input"
         :value="model"
@@ -33,11 +38,13 @@ defineExpose({ focus: () => input.value?.focus() })
         autocomplete="off"
         placeholder="0"
         :autofocus="autofocus"
-        class="tabular max-w-full min-w-[1ch] flex-initial bg-transparent text-center [field-sizing:content] text-4xl font-bold outline-none placeholder:text-hint/50"
+        class="display max-w-full min-w-[1ch] flex-initial bg-transparent text-center [field-sizing:content] leading-tight outline-none placeholder:text-hint/40 focus-visible:outline-none"
+        :class="sizeClass"
         :aria-invalid="!!error"
         @input="onInput"
       />
-      <span v-if="!prefix" class="shrink-0 text-xl font-semibold text-hint">{{ unit }}</span>
+      <!-- Currency as a chip, not part of the number -->
+      <span class="shrink-0 rounded-full bg-accent-soft px-3 py-1 text-sm font-bold text-accent">{{ unit }}</span>
     </span>
     <span v-if="error" class="mt-1 block text-center text-sm text-danger">{{ error }}</span>
   </label>

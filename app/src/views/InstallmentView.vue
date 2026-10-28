@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
 import type { Installment, Transaction } from '@/api/types'
 import AmountInput from '@/components/AmountInput.vue'
+import SkeletonList from '@/components/SkeletonList.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FallbackButton from '@/components/FallbackButton.vue'
@@ -18,6 +19,8 @@ import { useFormat } from '@/composables/useFormat'
 import { useMainButton } from '@/composables/useMainButton'
 import { categoryLabel } from '@/i18n'
 import { ACCOUNT_ICONS } from '@/lib/accounts'
+import { darken } from '@/lib/accountStyle'
+import { categoryStyle } from '@/lib/categoryStyle'
 import { formatDay } from '@/lib/dates'
 import { currencyLabel, parseAmount, toInputValue } from '@/lib/money'
 import { confirmDialog, haptic } from '@/lib/telegram'
@@ -97,6 +100,11 @@ const accountOptions = computed(() =>
     .filter((a) => a.currency === plan.value?.currency)
     .map((a) => ({ value: String(a.id), label: a.name, icon: ACCOUNT_ICONS[a.type], hint: money(a.balance_minor, a.currency) })),
 )
+const heroBg = computed(() => {
+  const c = categoryStyle(category.value).color
+  return `linear-gradient(135deg, ${c} 0%, ${darken(c, 0.35)} 100%)`
+})
+
 const overdue = computed(() => !!plan.value?.next && plan.value.next.due_on < today())
 
 async function pay() {
@@ -185,21 +193,22 @@ const { native } = useMainButton(
     </button>
   </PageHeader>
 
-  <div v-if="loading" class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
+  <SkeletonList v-if="loading" hero />
   <EmptyState v-else-if="failed || !plan" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
 
   <div v-else class="space-y-4 px-4 pb-6">
-    <section class="card p-4">
-      <div class="truncate text-sm text-hint">
+    <section class="detail-hero relative overflow-hidden rounded-[26px] p-5 text-white" :style="{ background: heroBg }">
+      <span class="absolute -top-12 -right-10 size-40 rounded-full bg-white/10" aria-hidden="true" />
+      <div class="truncate text-sm text-white/75">
         {{ category?.icon }} {{ categoryLabel(category) }}<template v-if="plan.provider"> · {{ plan.provider }}</template>
       </div>
-      <div class="mt-1 text-sm text-hint">{{ $t('inst.remaining') }}</div>
-      <div class="tabular text-3xl font-bold">{{ money(plan.remaining_minor, plan.currency) }}</div>
-      <div class="tabular mb-3 text-sm text-hint">
-        <template v-if="plan.closed"><AppIcon name="check" :size="14" class="inline text-income" /> {{ $t('installments.paid_off') }} · </template>
+      <div class="mt-1 text-sm text-white/75">{{ $t('inst.remaining') }}</div>
+      <div class="tabular display text-[34px] leading-tight">{{ money(plan.remaining_minor, plan.currency) }}</div>
+      <div class="tabular mb-3 text-sm text-white/75">
+        <template v-if="plan.closed"><AppIcon name="check" :size="14" class="inline text-mint" /> {{ $t('installments.paid_off') }} · </template>
         {{ $t('installments.paid_of', { paid: money(plan.paid_minor, plan.currency), total: money(plan.total_minor, plan.currency) }) }}
       </div>
-      <ProgressBar :value="plan.paid_minor" :total="plan.total_minor" :danger="overdue" />
+      <ProgressBar :value="plan.paid_minor" :total="plan.total_minor" :danger="overdue" on-dark />
     </section>
 
     <section v-if="plan.next" class="card space-y-4 p-4">
@@ -234,7 +243,7 @@ const { native } = useMainButton(
     </section>
 
     <section>
-      <h2 class="px-1 pb-1 text-sm font-medium text-hint">{{ $t('inst.schedule') }}</h2>
+      <h2 class="eyebrow px-1 pb-2">{{ $t('inst.schedule') }}</h2>
       <ol class="card overflow-hidden py-1">
         <li
           v-for="row in plan.schedule"
@@ -264,7 +273,7 @@ const { native } = useMainButton(
     </section>
 
     <section v-if="payments.length">
-      <h2 class="px-1 pb-1 text-sm font-medium text-hint">{{ $t('debt.history') }}</h2>
+      <h2 class="eyebrow px-1 pb-2">{{ $t('debt.history') }}</h2>
       <div class="card overflow-hidden py-1">
         <div v-for="tx in payments" :key="tx.id" class="flex items-center">
           <TxRow :tx="tx" dated class="min-w-0 flex-1" @open="() => {}" />

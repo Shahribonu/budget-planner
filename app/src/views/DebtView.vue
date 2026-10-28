@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
 import type { Debt, DebtPatch, Transaction } from '@/api/types'
 import AmountInput from '@/components/AmountInput.vue'
+import SkeletonList from '@/components/SkeletonList.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FallbackButton from '@/components/FallbackButton.vue'
@@ -92,6 +93,13 @@ const origin = computed(() => {
   }
   return t(d.direction === 'lent' ? 'debt.lent_on_from' : 'debt.borrowed_on_to', { date, account })
 })
+
+/** Lent money in violet, borrowed in coral: the direction at a glance (also spelled out in text). */
+const heroBg = computed(() =>
+  debt.value?.direction === 'borrowed'
+    ? 'linear-gradient(135deg, #ff6b5a 0%, #c9372c 100%)'
+    : 'linear-gradient(135deg, #5b3df5 0%, #3a1fc9 100%)',
+)
 
 const overdue = computed(() => !!debt.value && !debt.value.closed && !!debt.value.due_on && debt.value.due_on < today())
 
@@ -211,22 +219,23 @@ const { native } = useMainButton(
     </button>
   </PageHeader>
 
-  <div v-if="loading" class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
+  <SkeletonList v-if="loading" hero />
   <EmptyState v-else-if="failed || !debt" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
 
   <div v-else class="space-y-4 px-4 pb-6">
-    <section class="card p-4">
-      <div class="flex items-center gap-1 text-sm text-hint">
+    <section class="detail-hero relative overflow-hidden rounded-[26px] p-5 text-white" :style="{ background: heroBg }">
+      <span class="absolute -top-12 -right-10 size-40 rounded-full bg-white/10" aria-hidden="true" />
+      <div class="flex items-center gap-1 text-sm text-white/75">
         <AppIcon :name="debt.direction === 'lent' ? 'in' : 'out'" :size="14" />
         {{ debt.direction === 'lent' ? $t('debts.they_owe') : $t('debts.i_owe') }} · {{ $t('debt.remaining') }}
       </div>
-      <div class="tabular mt-1 text-3xl font-bold">{{ money(debt.remaining_minor, debt.currency) }}</div>
-      <div class="tabular mb-3 text-sm text-hint">
-        <template v-if="debt.closed"><AppIcon name="check" :size="14" class="inline text-income" /> {{ $t('debts.paid_off') }} · </template>
+      <div class="tabular mt-1 display text-[34px] leading-tight">{{ money(debt.remaining_minor, debt.currency) }}</div>
+      <div class="tabular mb-3 text-sm text-white/75">
+        <template v-if="debt.closed"><AppIcon name="check" :size="14" class="inline text-mint" /> {{ $t('debts.paid_off') }} · </template>
         {{ $t('debt.principal') }}: {{ money(debt.principal_minor, debt.currency) }}
       </div>
-      <ProgressBar :value="debt.principal_minor - debt.remaining_minor" :total="debt.principal_minor" :danger="overdue" />
-      <p class="mt-3 text-sm text-hint">{{ origin }}</p>
+      <ProgressBar :value="debt.principal_minor - debt.remaining_minor" :total="debt.principal_minor" :danger="overdue" on-dark />
+      <p class="mt-3 text-sm text-white/75">{{ origin }}</p>
     </section>
 
     <section class="card divide-y divide-separator">
@@ -279,7 +288,7 @@ const { native } = useMainButton(
     </section>
 
     <section v-if="history.length">
-      <h2 class="px-1 pb-1 text-sm font-medium text-hint">{{ $t('debt.history') }}</h2>
+      <h2 class="eyebrow px-1 pb-2">{{ $t('debt.history') }}</h2>
       <div class="card overflow-hidden py-1">
         <div v-for="tx in history" :key="tx.id" class="flex items-center">
           <TxRow :tx="tx" dated class="min-w-0 flex-1" @open="() => {}" />

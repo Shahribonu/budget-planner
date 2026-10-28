@@ -5,7 +5,9 @@ import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
 import type { Currency, Recurring } from '@/api/types'
 import AmountInput from '@/components/AmountInput.vue'
+import SkeletonList from '@/components/SkeletonList.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import CategoryIcon from '@/components/CategoryIcon.vue'
 import BottomSheet from '@/components/BottomSheet.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -195,7 +197,7 @@ function refreshPlan() {
   </PageHeader>
 
   <div class="space-y-4 px-4 pb-6">
-    <div v-if="loading" class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
+    <SkeletonList v-if="loading" class="-mx-4" />
     <EmptyState v-else-if="failed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
     <EmptyState
       v-else-if="!items.length"
@@ -206,7 +208,7 @@ function refreshPlan() {
     />
 
     <section v-for="g in groups" :key="g.kind">
-      <h2 class="flex items-center gap-1 px-1 pb-1 text-sm font-medium text-hint">
+      <h2 class="eyebrow flex items-center gap-1 px-1 pb-2">
         <AppIcon :name="g.kind === 'income' ? 'in' : 'out'" :size="14" />
         {{ g.kind === 'income' ? $t('recurring.income') : $t('recurring.bills') }}
       </h2>
@@ -218,9 +220,7 @@ function refreshPlan() {
           class="flex w-full items-center gap-3 px-4 py-2.5 text-left active:bg-page/60"
           @click="openSheet(r)"
         >
-          <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-page text-xl" aria-hidden="true">
-            {{ (r.category_id && categories.byId.get(r.category_id)?.icon) || (r.kind === 'income' ? '💼' : '🧾') }}
-          </span>
+          <CategoryIcon :category="r.category_id ? categories.byId.get(r.category_id) : undefined" :size="44" />
           <span class="min-w-0 flex-1">
             <span class="block truncate font-medium">{{ r.title }}</span>
             <span class="block text-sm text-hint">{{ $t('recurring.day_n', { n: r.day_of_month }) }}</span>

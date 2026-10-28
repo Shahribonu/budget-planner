@@ -87,7 +87,7 @@ function pickColor(c: string | null) {
   color.value = c
 }
 
-/** The styling fields, sent with PATCH (also right after create: POST doesn't take them). */
+/** The styling fields; sent on create and on edit. */
 function stylePatch(): AccountPatch {
   return {
     color: color.value,
@@ -113,14 +113,16 @@ async function save() {
     if (editId) {
       await accounts.update(editId, { name: name.value.trim(), ...stylePatch() })
     } else {
-      const created = await accounts.create({
+      const style = stylePatch()
+      await accounts.create({
         name: name.value.trim(),
         type: type.value,
         currency: currency.value,
         opening_balance_minor: openingMinor ?? 0,
+        color: style.color ?? undefined,
+        include_in_total: style.include_in_total,
+        card_mask: style.card_mask ?? undefined,
       })
-      const style = stylePatch()
-      if (style.color || style.card_mask || !style.include_in_total) await accounts.update(created.id, style)
     }
     haptic.success()
     toast.show(t('common.saved'))

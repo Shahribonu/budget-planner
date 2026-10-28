@@ -205,7 +205,7 @@ const donutTotal = computed(() => (mainBreakdown.value?.rows ?? []).reduce((s, r
 // Recent, grouped as Today / Yesterday / date.
 const recentGroups = computed(() => {
   const out: { day: string; items: Transaction[] }[] = []
-  for (const tx of summary.value?.recent ?? []) {
+  for (const tx of (summary.value?.recent ?? []).slice(0, 5)) {
     const last = out[out.length - 1]
     if (last?.day === tx.occurred_on) last.items.push(tx)
     else out.push({ day: tx.occurred_on, items: [tx] })

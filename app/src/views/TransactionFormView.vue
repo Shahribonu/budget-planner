@@ -5,16 +5,19 @@ import { useRoute, useRouter } from 'vue-router'
 import { ApiError, api } from '@/api/client'
 import type { Account, InputTransactionType, Transaction, TransactionInput } from '@/api/types'
 import AmountInput from '@/components/AmountInput.vue'
+import SkeletonList from '@/components/SkeletonList.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FallbackButton from '@/components/FallbackButton.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
+import CategoryIcon from '@/components/CategoryIcon.vue'
 import TxRow from '@/components/TxRow.vue'
 import { useBack } from '@/composables/useBack'
 import { useFormat } from '@/composables/useFormat'
 import { useMainButton } from '@/composables/useMainButton'
 import { categoryLabel } from '@/i18n'
+import { accountColor, darken } from '@/lib/accountStyle'
 import { addDays } from '@/lib/dates'
 import { currencyLabel, formatMoney, parseAmount, toInputValue } from '@/lib/money'
 import { haptic } from '@/lib/telegram'
@@ -268,6 +271,12 @@ const { native } = useMainButton(saveLabel, saving, save)
 
 const typeOptions = computed(() => INPUT_TYPES.map((v) => ({ value: v, label: t(`types.${v}`) })))
 const yesterday = computed(() => addDays(today(), -1))
+
+/** Account chips wear their account's colour. */
+function chipStyle(a: Account) {
+  const c = accountColor(a)
+  return { background: `linear-gradient(135deg, ${c} 0%, ${darken(c, 0.3)} 100%)` }
+}
 </script>
 
 <template>
@@ -284,7 +293,7 @@ const yesterday = computed(() => addDays(today(), -1))
     </button>
   </PageHeader>
 
-  <div v-if="loading" class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
+  <SkeletonList v-if="loading" :rows="3" hero />
   <EmptyState v-else-if="loadFailed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
 
   <div v-else-if="readOnly && original" class="px-4">
@@ -322,11 +331,15 @@ const yesterday = computed(() => addDays(today(), -1))
           type="button"
           class="account-chip"
           :class="{ 'account-chip-on': a.id === accountId }"
+          :style="chipStyle(a)"
           :aria-pressed="a.id === accountId"
           @click="selectAccount(a.id)"
         >
-          <span class="block truncate font-medium">{{ a.name }}</span>
-          <span class="tabular block truncate text-xs opacity-75">{{ money(a.balance_minor, a.currency) }}</span>
+          <span class="flex items-center justify-between gap-1">
+            <span class="block truncate font-semibold">{{ a.name }}</span>
+            <AppIcon v-if="a.id === accountId" name="check" :size="16" class="shrink-0" />
+          </span>
+          <span class="tabular block truncate text-xs text-white/80">{{ money(a.balance_minor, a.currency) }}</span>
         </button>
       </div>
       <p v-if="errors.account" class="field-error">{{ errors.account }}</p>
@@ -345,11 +358,15 @@ const yesterday = computed(() => addDays(today(), -1))
           type="button"
           class="account-chip"
           :class="{ 'account-chip-on': a.id === toAccountId }"
+          :style="chipStyle(a)"
           :aria-pressed="a.id === toAccountId"
           @click="selectToAccount(a.id)"
         >
-          <span class="block truncate font-medium">{{ a.name }}</span>
-          <span class="tabular block truncate text-xs opacity-75">{{ money(a.balance_minor, a.currency) }}</span>
+          <span class="flex items-center justify-between gap-1">
+            <span class="block truncate font-semibold">{{ a.name }}</span>
+            <AppIcon v-if="a.id === toAccountId" name="check" :size="16" class="shrink-0" />
+          </span>
+          <span class="tabular block truncate text-xs text-white/80">{{ money(a.balance_minor, a.currency) }}</span>
         </button>
       </div>
       <p v-if="errors.to_account" class="field-error">{{ errors.to_account }}</p>
@@ -375,13 +392,18 @@ const yesterday = computed(() => addDays(today(), -1))
           v-for="c in categoryOptions"
           :key="c.id"
           type="button"
-          class="pressable flex min-w-0 flex-col items-center gap-1 rounded-xl border-2 px-1 py-2"
-          :class="c.id === categoryId ? 'border-accent bg-accent/10' : 'border-transparent bg-surface'"
+          class="pressable flex min-w-0 flex-col items-center gap-1.5 rounded-2xl px-1 py-2.5 transition-colors"
+          :class="c.id === categoryId ? 'bg-accent-soft' : ''"
           :aria-pressed="c.id === categoryId"
           @click="selectCategory(c.id)"
         >
-          <span class="text-2xl" aria-hidden="true">{{ c.icon }}</span>
-          <span class="line-clamp-2 w-full text-center text-[11px] leading-tight">{{ categoryLabel(c) }}</span>
+          <span class="rounded-full p-0.5 transition-shadow" :class="{ 'ring-2 ring-accent': c.id === categoryId }">
+            <CategoryIcon :category="c" :size="44" />
+          </span>
+          <span
+            class="line-clamp-2 w-full text-center text-[11px] leading-tight"
+            :class="c.id === categoryId ? 'font-bold text-accent' : 'text-text'"
+          >{{ categoryLabel(c) }}</span>
         </button>
       </div>
       <p v-if="errors.category" class="field-error">{{ errors.category }}</p>
@@ -401,7 +423,7 @@ const yesterday = computed(() => addDays(today(), -1))
           type="date"
           :max="today()"
           :aria-label="$t('form.date')"
-          class="min-w-0 flex-1 rounded-xl bg-surface px-3 py-2 text-sm outline-none"
+          class="min-w-0 flex-1 rounded-full bg-surface px-4 py-2 text-sm outline-none"
         />
       </div>
     </section>
@@ -414,7 +436,7 @@ const yesterday = computed(() => addDays(today(), -1))
         maxlength="200"
         enterkeyhint="done"
         :placeholder="$t('form.description_placeholder')"
-        class="w-full rounded-xl bg-surface px-3 py-3 outline-none placeholder:text-hint"
+        class="w-full rounded-2xl bg-surface px-4 py-3.5 outline-none placeholder:text-hint"
       />
     </label>
   </form>
@@ -426,19 +448,19 @@ const yesterday = computed(() => addDays(today(), -1))
 @reference '../style.css';
 
 .field-label {
-  @apply mb-2 block text-sm font-medium text-hint;
+  @apply mb-2 block text-[11px] font-semibold tracking-[0.08em] text-hint uppercase;
 }
 .field-error {
   @apply mt-1 text-sm text-danger;
 }
 .account-chip {
-  @apply pressable w-32 shrink-0 rounded-xl border-2 border-transparent bg-surface px-3 py-2 text-left;
+  @apply pressable w-36 shrink-0 rounded-2xl px-3 py-2.5 text-left text-white opacity-60 transition-opacity;
 }
 .account-chip-on {
-  @apply border-accent;
+  @apply opacity-100 ring-2 ring-accent ring-offset-2 ring-offset-canvas;
 }
 .date-chip {
-  @apply pressable rounded-full bg-surface px-3 py-2 text-sm;
+  @apply pressable rounded-full bg-surface px-4 py-2 text-sm font-medium;
 }
 .date-chip-on {
   @apply bg-accent text-on-accent;

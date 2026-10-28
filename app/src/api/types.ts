@@ -77,6 +77,9 @@ export interface AccountCreate {
   type: AccountType
   currency: Currency
   opening_balance_minor?: number
+  color?: string
+  include_in_total?: boolean
+  card_mask?: string
 }
 
 export interface AccountPatch {

@@ -12,15 +12,15 @@ function select(value: T) {
 </script>
 
 <template>
-  <div role="radiogroup" :aria-label="label" class="flex gap-1 rounded-xl bg-page p-1">
+  <div role="radiogroup" :aria-label="label" class="flex gap-1 rounded-full bg-page p-1">
     <button
       v-for="opt in options"
       :key="opt.value"
       type="button"
       role="radio"
       :aria-checked="model === opt.value"
-      class="min-w-0 flex-1 truncate rounded-lg px-1 py-2 text-[13px] font-medium transition-colors"
-      :class="model === opt.value ? 'bg-bg text-text shadow-sm' : 'text-hint'"
+      class="pressable min-w-0 flex-1 truncate rounded-full px-1.5 py-2 text-[13px] font-semibold transition-colors"
+      :class="model === opt.value ? 'bg-accent text-on-accent shadow-md shadow-accent/30' : 'text-hint'"
       @click="select(opt.value)"
     >
       {{ opt.label }}

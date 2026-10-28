@@ -11,6 +11,7 @@ import { useCategoriesStore } from '@/stores/categories'
 import { useMonthlyPlanStore } from '@/stores/monthlyPlan'
 import { useToastStore } from '@/stores/toast'
 import AppIcon from '../AppIcon.vue'
+import SkeletonList from '../SkeletonList.vue'
 import EmptyState from '../EmptyState.vue'
 import SegmentedControl from '../SegmentedControl.vue'
 import PlanComposer from './PlanComposer.vue'
@@ -112,7 +113,7 @@ const examples = computed(() =>
       @update:model-value="setCurrency"
     />
 
-    <div v-if="loading" class="py-10 text-center text-hint">{{ $t('common.loading') }}</div>
+    <SkeletonList v-if="loading" :rows="3" hero class="-mx-4" />
     <EmptyState v-else-if="failed || !plan.view" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
 
     <template v-else>

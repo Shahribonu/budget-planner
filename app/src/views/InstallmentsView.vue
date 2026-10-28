@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import type { Installment } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
+import CategoryIcon from '@/components/CategoryIcon.vue'
+import SkeletonList from '@/components/SkeletonList.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FallbackButton from '@/components/FallbackButton.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -59,7 +61,7 @@ const { native } = useMainButton(
   </PageHeader>
 
   <div class="space-y-4 px-4 pb-4">
-    <div v-if="loading" class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
+    <SkeletonList v-if="loading" class="-mx-4" />
     <EmptyState v-else-if="failed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
     <EmptyState
       v-else-if="!plans.all.length"
@@ -77,9 +79,7 @@ const { native } = useMainButton(
         class="block px-4 py-3 active:bg-page/60"
       >
         <span class="flex items-start gap-3">
-          <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-page text-xl" aria-hidden="true">
-            {{ categories.byId.get(p.category_id)?.icon ?? '🛍️' }}
-          </span>
+          <CategoryIcon :category="categories.byId.get(p.category_id)" :size="44" />
           <span class="min-w-0 flex-1">
             <span class="block truncate font-medium">{{ p.title }}</span>
             <span class="tabular block truncate text-sm text-hint">

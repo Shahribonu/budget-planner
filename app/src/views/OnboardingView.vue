@@ -129,15 +129,24 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
 </script>
 
 <template>
-  <div class="px-4 pt-8 pb-6">
-    <template v-if="step === 1">
-      <div class="mb-6 text-center">
-        <div class="mb-2 text-5xl" aria-hidden="true">👋</div>
-        <h1 class="text-2xl font-bold">{{ $t('onboarding.welcome') }}</h1>
-        <p class="mt-1 text-hint">{{ $t('onboarding.welcome_body') }}</p>
-      </div>
+  <!-- Step 1 opens on the brand hero -->
+  <section v-if="step === 1" class="onb-hero relative overflow-hidden px-6 pt-10 pb-24 text-center text-white">
+    <span class="blob blob-1" aria-hidden="true" />
+    <span class="blob blob-2" aria-hidden="true" />
+    <svg viewBox="0 0 120 90" class="wave-in relative mx-auto h-24 w-auto" aria-hidden="true">
+      <rect x="14" y="22" width="92" height="60" rx="16" fill="#fff" opacity=".95" />
+      <rect x="14" y="22" width="92" height="20" rx="10" fill="#cfc4ff" />
+      <rect x="72" y="46" width="38" height="22" rx="11" fill="#2bd9a0" />
+      <circle cx="83" cy="57" r="4.5" fill="#fff" />
+      <path d="M42 10l5 9m14-12v11m16-7-5 9" stroke="#2bd9a0" stroke-width="4.5" stroke-linecap="round" />
+    </svg>
+    <h1 class="display relative mt-4 text-[30px]">{{ $t('onboarding.welcome') }}</h1>
+    <p class="relative mx-auto mt-1 max-w-xs text-white/85">{{ $t('onboarding.welcome_body') }}</p>
+  </section>
 
-      <h2 class="mb-2 text-sm font-medium text-hint">{{ $t('onboarding.language') }}</h2>
+  <div class="px-4 pb-6" :class="step === 1 ? '-mt-16 relative' : 'pt-8'">
+    <template v-if="step === 1">
+      <h2 class="eyebrow mb-2 px-1 text-white/80">{{ $t('onboarding.language') }}</h2>
       <div class="mb-6 overflow-hidden card" role="radiogroup" :aria-label="$t('onboarding.language')">
         <button
           v-for="l in LANGUAGES"
@@ -145,7 +154,7 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
           type="button"
           role="radio"
           :aria-checked="language === l"
-          class="flex w-full items-center justify-between border-b border-separator px-4 py-3.5 text-left last:border-b-0"
+          class="flex w-full items-center justify-between border-b border-separator px-4 py-4 text-left font-medium last:border-b-0 active:bg-page/60"
           @click="language = l"
         >
           {{ $t(`languages.${l}`) }}
@@ -158,7 +167,7 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
         </button>
       </div>
 
-      <h2 class="mb-2 text-sm font-medium text-hint">{{ $t('onboarding.main_currency') }}</h2>
+      <h2 class="eyebrow mb-2 px-1">{{ $t('onboarding.main_currency') }}</h2>
       <SegmentedControl v-model="mainCurrency" :options="currencyOptions" :label="$t('onboarding.main_currency')" />
     </template>
 
@@ -234,3 +243,46 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
 
   <FallbackButton v-if="!native" :label="buttonText" :busy="busy" @click="step === 1 ? next() : finish()" />
 </template>
+
+<style scoped>
+.onb-hero {
+  margin-top: calc(-1 * var(--safe-top));
+  padding-top: calc(var(--safe-top) + 2.5rem);
+  background: linear-gradient(165deg, #5b3df5 0%, #6a4bfa 55%, #7b5cff 100%);
+  border-bottom-left-radius: 32px;
+  border-bottom-right-radius: 32px;
+}
+.blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(30px);
+}
+.blob-1 {
+  width: 220px;
+  height: 220px;
+  top: -70px;
+  right: -60px;
+  background: rgb(168 146 255 / 65%);
+}
+.blob-2 {
+  width: 180px;
+  height: 180px;
+  bottom: -40px;
+  left: -60px;
+  background: rgb(43 217 160 / 35%);
+}
+.wave-in {
+  animation: pop 700ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-8deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wave-in {
+    animation: none;
+  }
+}
+</style>

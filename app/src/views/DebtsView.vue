@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import type { Currency, Debt, DebtDirection } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
+import SkeletonList from '@/components/SkeletonList.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FallbackButton from '@/components/FallbackButton.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -19,6 +20,14 @@ const debts = useDebtsStore()
 const { money, lang, today } = useFormat()
 
 const loading = ref(!debts.loaded)
+
+const PERSON_COLORS = ['#5b3df5', '#0f9e6e', '#ff6b5a', '#f5a524', '#3b82f6', '#ec4899', '#14b8a6', '#a855f7']
+/** A stable colour per person, so the same name always looks the same. */
+function personColor(name: string): string {
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return PERSON_COLORS[h % PERSON_COLORS.length]!
+}
 const failed = ref(false)
 const showClosed = ref(false)
 
@@ -71,7 +80,7 @@ const { native } = useMainButton(
   </PageHeader>
 
   <div class="space-y-4 px-4 pb-4">
-    <div v-if="loading" class="py-20 text-center text-hint">{{ $t('common.loading') }}</div>
+    <SkeletonList v-if="loading" class="-mx-4" />
     <EmptyState v-else-if="failed" icon="⚠️" :body="$t('common.error')" :action="$t('common.retry')" @action="load" />
     <EmptyState
       v-else-if="!debts.all.length"
@@ -83,7 +92,7 @@ const { native } = useMainButton(
 
     <section v-for="g in groups" :key="g.direction">
       <div class="flex items-baseline justify-between gap-2 px-1 pb-1">
-        <h2 class="flex items-center gap-1 text-sm font-medium text-hint">
+        <h2 class="eyebrow flex items-center gap-1">
           <AppIcon :name="g.direction === 'lent' ? 'in' : 'out'" :size="14" />{{ g.title }}
         </h2>
         <span class="tabular truncate text-sm font-semibold">
@@ -99,7 +108,8 @@ const { native } = useMainButton(
         >
           <span class="flex items-center gap-3">
             <span
-              class="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft font-bold text-accent uppercase"
+              class="flex size-11 shrink-0 items-center justify-center rounded-full font-bold text-white uppercase"
+              :style="{ background: personColor(d.counterparty) }"
               aria-hidden="true"
             >
               {{ d.counterparty.slice(0, 1) }}
