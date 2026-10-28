@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	_ "time/tzdata" // user time zones work in minimal images without zoneinfo
 
 	"github.com/Shahribonu/budget-planner/backend/internal/api"
-	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"github.com/Shahribonu/budget-planner/backend/internal/bot"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/llm"
@@ -70,16 +70,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	prices := billing.Prices{MonthlyStars: atoi(getenv("PREMIUM_MONTHLY_STARS", "150")), YearlyStars: atoi(getenv("PREMIUM_YEARLY_STARS", "1500"))}
-	cfg := api.Config{BotToken: botToken, DevAuth: env == "development"}
+	cfg := api.Config{BotToken: botToken, DevAuth: env == "development", StaticDir: os.Getenv("STATIC_DIR")}
 	if botToken != "" {
-		cfg.Billing = billing.New(pool, telegram.New(botToken), prices)
 		cfg.Telegram = telegram.New(botToken)
 	}
 
 	if botToken != "" {
 		tg := telegram.New(botToken)
-		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capture.New(pool, l, ai), planning.NewService(pool, l), billing.New(pool, tg, prices), transcriber)
+		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capture.New(pool, l, ai), planning.NewService(pool, l), transcriber)
 		mode := getenv("BOT_MODE", map[bool]string{true: "polling", false: "webhook"}[env == "development"])
 		switch mode {
 		case "polling":

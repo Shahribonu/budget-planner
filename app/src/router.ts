@@ -8,6 +8,8 @@ declare module 'vue-router' {
     tabs?: boolean
     /** Sub-page: show Telegram BackButton. */
     sub?: boolean
+    /** Reachable before onboarding (legal texts), skips the onboarding redirect. */
+    public?: boolean
   }
 }
 
@@ -20,7 +22,8 @@ export const router = createRouter({
     { path: '/plan', name: 'plan', component: () => import('@/views/PlanView.vue'), meta: { tabs: true } },
     { path: '/accounts', name: 'accounts', component: () => import('@/views/AccountsView.vue'), meta: { sub: true } },
     { path: '/categories', name: 'categories', component: () => import('@/views/CategoriesView.vue'), meta: { sub: true } },
-    { path: '/premium', name: 'premium', component: () => import('@/views/PremiumView.vue'), meta: { sub: true } },
+    { path: '/legal/:doc(privacy|terms)', name: 'legal', component: () => import('@/views/LegalView.vue'), meta: { sub: true, public: true } },
+    { path: '/deleted', name: 'deleted', component: () => import('@/views/DeletedView.vue'), meta: { public: true } },
     { path: '/recurring', name: 'recurring', component: () => import('@/views/RecurringView.vue'), meta: { sub: true } },
     { path: '/debts', name: 'debts', component: () => import('@/views/DebtsView.vue'), meta: { sub: true } },
     { path: '/debts/new', name: 'debt-new', component: () => import('@/views/DebtFormView.vue'), meta: { sub: true } },
@@ -40,6 +43,8 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   const user = useUserStore()
+  // After deleting the account, nothing may call /me again (it would start a new account).
+  if (user.deleted) return to.name === 'deleted' ? true : { name: 'deleted', replace: true }
   let onboarded: boolean
   try {
     onboarded = (await user.load()).onboarded
@@ -47,7 +52,7 @@ router.beforeEach(async (to) => {
     user.error = e
     return true // App.vue renders the error state
   }
-  if (!onboarded && to.name !== 'onboarding') return { name: 'onboarding', replace: true }
+  if (!onboarded && to.name !== 'onboarding' && !to.meta.public) return { name: 'onboarding', replace: true }
   if (onboarded && to.name === 'onboarding') return { name: 'home', replace: true }
   return true
 })

@@ -6,27 +6,8 @@ import (
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
 )
 
-func TestFreePlanAllowsOneBudget(t *testing.T) {
-	f := setup(t)
-	if _, err := f.svc.CreateBudget(ctx, f.user, nil, "UZS", 100); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.svc.CreateBudget(ctx, f.user, ptr(f.cats["cafe"]), "UZS", 100); !isValidation(err, "premium_required") {
-		t.Errorf("second free budget: %v", err)
-	}
-	if _, err := f.pool.Exec(ctx, `update users set premium_until = now() + interval '1 day' where id = $1`, f.user); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.svc.CreateBudget(ctx, f.user, ptr(f.cats["cafe"]), "UZS", 100); err != nil {
-		t.Errorf("premium second budget: %v", err)
-	}
-}
-
 func TestBudgets(t *testing.T) {
 	f := setup(t)
-	if _, err := f.pool.Exec(ctx, `update users set premium_until = now() + interval '1 day' where id = $1`, f.user); err != nil {
-		t.Fatal(err)
-	}
 	cash := f.account("Naqd", "cash", "UZS", 5_000_000*sum)
 	humo := f.account("Humo", "humo", "UZS", 0)
 	usd := f.account("Dollar", "cash", "USD", 0)

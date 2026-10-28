@@ -727,7 +727,7 @@ func (q *Queries) UpdateRecurring(ctx context.Context, arg UpdateRecurringParams
 }
 
 const usersDueForPlanPrompt = `-- name: UsersDueForPlanPrompt :many
-select u.id, u.telegram_id, u.first_name, u.username, u.language, u.main_currency, u.timezone, u.created_at, u.started_at, u.notify_enabled, u.notify_time, u.last_summary_on, u.chat_mode, u.chat_mode_until, u.plan_prompted_month, u.premium_until, u.trial_started_at from users u
+select u.id, u.telegram_id, u.first_name, u.username, u.language, u.main_currency, u.timezone, u.created_at, u.started_at, u.notify_enabled, u.notify_time, u.last_summary_on, u.chat_mode, u.chat_mode_until, u.plan_prompted_month, u.premium_until, u.trial_started_at, u.terms_accepted_at, u.terms_version, u.last_export_at from users u
 where u.started_at is not null and u.notify_enabled
   and extract(day from now() at time zone u.timezone) >= 25
   and (now() at time zone u.timezone)::time >= time '10:00'
@@ -765,6 +765,9 @@ func (q *Queries) UsersDueForPlanPrompt(ctx context.Context) ([]User, error) {
 			&i.PlanPromptedMonth,
 			&i.PremiumUntil,
 			&i.TrialStartedAt,
+			&i.TermsAcceptedAt,
+			&i.TermsVersion,
+			&i.LastExportAt,
 		); err != nil {
 			return nil, err
 		}

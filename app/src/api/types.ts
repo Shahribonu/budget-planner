@@ -41,15 +41,14 @@ export interface User {
   notify_enabled: boolean
   /** HH:MM in the user's time zone. */
   notify_time: string
-  /** Active now, paid or trial (the API doesn't tell them apart). */
   /** First contact with the bot or app. */
   created_at: string
-  premium: boolean
-  premium_until: string | null
-  trial_used: boolean
+  /** Terms and Privacy Policy accepted (onboarding or the one-time consent sheet). */
+  terms_accepted: boolean
 }
 
 export interface UserPatch {
+  accept_terms?: true
   language?: Language
   main_currency?: Currency
   timezone?: string
@@ -416,16 +415,4 @@ export interface RecurringPatch {
   account_id?: number | null
 }
 
-export type PremiumPlan = 'monthly' | 'yearly'
 
-export interface Invoice {
-  url: string
-  stars: number
-}
-
-export interface BillingPlans {
-  monthly_stars: number
-  yearly_stars: number
-  /** Budgets allowed on the free plan. */
-  free_budgets: number
-}

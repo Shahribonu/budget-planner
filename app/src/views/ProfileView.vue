@@ -1,24 +1,29 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { ApiError, api } from '@/api/client'
 import type { Currency, Language, UserPatch } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import BottomSheet from '@/components/BottomSheet.vue'
 import OptionSheet from '@/components/OptionSheet.vue'
+import HoldButton from '@/components/HoldButton.vue'
 import SettingsRow from '@/components/SettingsRow.vue'
+import UserAvatar from '@/components/UserAvatar.vue'
 import ToggleSwitch from '@/components/ToggleSwitch.vue'
 import { useFormat } from '@/composables/useFormat'
 import { LANGUAGES, setLanguage } from '@/i18n'
-import { formatDateNumeric, formatMonth, todayISO } from '@/lib/dates'
-import { prefs, type Prefs } from '@/lib/prefs'
+import { formatMonth, todayISO } from '@/lib/dates'
+import { clearLocalData, prefs, type Prefs } from '@/lib/prefs'
 import { CURRENCIES } from '@/lib/money'
-import { haptic, telegramPhotoUrl } from '@/lib/telegram'
+import { haptic } from '@/lib/telegram'
 import { useCategoriesStore } from '@/stores/categories'
 import { useAccountsStore } from '@/stores/accounts'
 import { useToastStore } from '@/stores/toast'
 import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
+const router = useRouter()
 const { lang } = useFormat()
 const categories = useCategoriesStore()
 const user = useUserStore()
@@ -30,8 +35,6 @@ onMounted(() => {
   void categories.load().catch(() => {})
 })
 
-const photo = telegramPhotoUrl()
-const initial = computed(() => (user.me?.first_name ?? '?').slice(0, 1).toUpperCase())
 const since = computed(() => (user.me?.created_at ? formatMonth(todayISO(user.me.timezone, new Date(user.me.created_at)).slice(0, 7), lang.value) : ''))
 const daysWithUs = computed(() => {
   if (!user.me?.created_at) return 0
@@ -52,7 +55,7 @@ const themeOptions = computed(() => (['system', 'light', 'dark'] as const).map((
 const styleOptions = computed(() => (['icons', 'emoji'] as const).map((v) => ({ value: v, label: t(`profile.style_${v}`) })))
 
 // One sheet open at a time.
-type Sheet = 'language' | 'currency' | 'theme' | 'style' | 'notify' | 'about' | 'support' | 'privacy' | null
+type Sheet = 'language' | 'currency' | 'theme' | 'style' | 'notify' | 'about' | 'support' | 'delete' | null
 const sheet = ref<Sheet>(null)
 const sheetOpen = (s: Exclude<Sheet, null>) => computed({ get: () => sheet.value === s, set: (v) => (sheet.value = v ? s : null) })
 const languageOpen = sheetOpen('language')
@@ -62,7 +65,7 @@ const styleOpen = sheetOpen('style')
 const notifyOpen = sheetOpen('notify')
 const aboutOpen = sheetOpen('about')
 const supportOpen = sheetOpen('support')
-const privacyOpen = sheetOpen('privacy')
+const deleteOpen = sheetOpen('delete')
 
 function setTheme(v: Prefs['theme'] | null) {
   if (v) prefs.theme = v
@@ -71,6 +74,44 @@ function setStyle(v: Prefs['categoryStyle'] | null) {
   if (v) prefs.categoryStyle = v
 }
 const version = __APP_VERSION__
+
+const exporting = ref(false)
+async function exportData() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    await api.exportData()
+    haptic.success()
+    toast.show(t('privacy.export_sent'))
+  } catch (e) {
+    haptic.error()
+    if (e instanceof ApiError && e.code === 'bot_blocked') toast.show(t('privacy.export_bot_blocked'))
+    else if (!(e instanceof ApiError && e.status === 429)) toast.error() // 429 already has its toast
+  } finally {
+    exporting.value = false
+  }
+}
+
+const deleting = ref(false)
+async function deleteAccount() {
+  if (deleting.value) return
+  deleting.value = true
+  try {
+    await api.deleteMe()
+    // Forget everything locally; the guard then allows only the goodbye screen.
+    clearLocalData()
+    user.deleted = true
+    user.me = null
+    sheet.value = null
+    haptic.success()
+    await router.replace({ name: 'deleted' })
+  } catch {
+    haptic.error()
+    toast.error()
+  } finally {
+    deleting.value = false
+  }
+}
 
 async function setLang(lang: Language | null) {
   if (!lang) return
@@ -146,10 +187,7 @@ function changeReminderTime(e: Event) {
     <!-- Who -->
     <header class="flex flex-col items-center text-center">
       <span class="avatar-ring rounded-full p-1">
-        <img v-if="photo" :src="photo" alt="" class="size-24 rounded-full object-cover" />
-        <span v-else class="flex size-24 items-center justify-center rounded-full bg-accent text-4xl font-bold text-white" aria-hidden="true">
-          {{ initial }}
-        </span>
+        <UserAvatar :size="96" ring="transparent" />
       </span>
       <h1 class="display mt-3 text-2xl">{{ user.me?.first_name }}</h1>
       <p v-if="user.me?.username" class="text-sm text-hint">@{{ user.me.username }}</p>
@@ -162,20 +200,6 @@ function changeReminderTime(e: Event) {
         <span class="block text-xs text-hint">{{ s.label }}</span>
       </div>
     </div>
-
-    <section>
-      <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_plan') }}</h2>
-      <RouterLink :to="{ name: 'premium' }" class="card pressable flex items-center gap-3 p-4">
-        <span class="premium-badge flex size-11 items-center justify-center rounded-full text-white"><AppIcon name="crown" :size="22" /></span>
-        <span class="min-w-0 flex-1">
-          <span class="block font-semibold">{{ $t('premium.title') }}</span>
-          <span class="block truncate text-sm text-hint">
-            {{ user.me?.premium && user.me.premium_until ? $t('premium.until', { date: formatDateNumeric(user.me.premium_until, user.me.timezone) }) : $t('premium.hero_sub') }}
-          </span>
-        </span>
-        <AppIcon name="chevron" :size="18" class="shrink-0 text-hint" />
-      </RouterLink>
-    </section>
 
     <section>
       <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_manage') }}</h2>
@@ -206,11 +230,24 @@ function changeReminderTime(e: Event) {
     </section>
 
     <section>
+      <h2 class="eyebrow mb-2 px-1">{{ $t('privacy.group') }}</h2>
+      <div class="card divide-y divide-separator overflow-hidden">
+        <SettingsRow icon="download" tone="#0f9e6e" :label="$t('privacy.export')" :value="exporting ? $t('common.loading') : undefined" @click="exportData" />
+        <SettingsRow icon="shield" tone="#5b3df5" :label="$t('legal.privacy')" :to="{ name: 'legal', params: { doc: 'privacy' } }" />
+        <SettingsRow icon="info" tone="#5b3df5" :label="$t('legal.terms')" :to="{ name: 'legal', params: { doc: 'terms' } }" />
+        <button type="button" class="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left font-semibold text-danger active:bg-page/60" @click="sheet = 'delete'">
+          <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-danger/12"><AppIcon name="trash" :size="18" /></span>
+          {{ $t('privacy.delete') }}
+        </button>
+      </div>
+      <p class="mt-2 px-1 text-xs text-hint">{{ $t('privacy.export_hint') }}</p>
+    </section>
+
+    <section>
       <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_about') }}</h2>
       <div class="card divide-y divide-separator overflow-hidden">
         <SettingsRow icon="info" tone="#8a87a0" :label="$t('profile.about')" :value="version" @click="sheet = 'about'" />
         <SettingsRow icon="help" tone="#8a87a0" :label="$t('profile.support')" @click="sheet = 'support'" />
-        <SettingsRow icon="shield" tone="#8a87a0" :label="$t('profile.privacy')" @click="sheet = 'privacy'" />
       </div>
     </section>
   </div>
@@ -242,18 +279,25 @@ function changeReminderTime(e: Event) {
       <p class="text-hint">{{ $t('profile.version', { v: version }) }}</p>
     </div>
   </BottomSheet>
+  <BottomSheet v-model:open="deleteOpen" :title="$t('privacy.delete_title')">
+    <div class="space-y-4 px-4 pt-1 pb-6">
+      <p class="text-[15px] font-medium">{{ $t('privacy.delete_lead') }}</p>
+      <ul class="space-y-2 text-sm">
+        <li v-for="k in ['delete_balances', 'delete_history', 'delete_plans']" :key="k" class="flex items-start gap-2">
+          <AppIcon name="x" :size="16" class="mt-0.5 shrink-0 text-danger" />{{ $t(`privacy.${k}`) }}
+        </li>
+      </ul>
+      <p class="text-xs text-hint">{{ $t('privacy.delete_export_first') }}</p>
+      <HoldButton :label="deleting ? $t('common.loading') : $t('privacy.delete_hold')" :disabled="deleting" @confirm="deleteAccount" />
+      <p class="text-center text-xs text-hint">{{ $t('privacy.delete_hold_hint') }}</p>
+    </div>
+  </BottomSheet>
   <BottomSheet v-model:open="supportOpen" :title="$t('profile.support')">
     <p class="px-4 pt-2 pb-6 text-sm">{{ $t('profile.support_body') }}</p>
-  </BottomSheet>
-  <BottomSheet v-model:open="privacyOpen" :title="$t('profile.privacy')">
-    <p class="px-4 pt-2 pb-6 text-sm">{{ $t('profile.privacy_body') }}</p>
   </BottomSheet>
 </template>
 
 <style scoped>
-.premium-badge {
-  background: linear-gradient(135deg, #7b62ff 0%, #4327d6 100%);
-}
 .avatar-ring {
   background: linear-gradient(135deg, var(--brand) 0%, var(--mint) 100%);
   box-shadow: 0 8px 24px rgb(91 61 245 / 25%);

@@ -16,3 +16,4 @@ coverage.out
 # Node / Mini App
 node_modules/
 dist/
+deploy/backups/

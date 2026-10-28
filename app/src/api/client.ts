@@ -4,7 +4,6 @@ import type {
   AccountCreate,
   AccountPatch,
   ApiErrorBody,
-  BillingPlans,
   Budget,
   BudgetCreate,
   BudgetList,
@@ -16,9 +15,7 @@ import type {
   DebtPatch,
   Installment,
   InstallmentCreate,
-  Invoice,
   NewPlanItem,
-  PremiumPlan,
   PaymentInput,
   PlanItemPatch,
   PlanPatch,
@@ -41,6 +38,8 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly field?: string,
+    /** Seconds from Retry-After on 429. */
+    readonly retryAfter?: number,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -93,7 +92,11 @@ async function request<T>(method: string, path: string, opts: { query?: Query; b
   }
   if (!res.ok) {
     const err = (data as ApiErrorBody | undefined)?.error
-    throw new ApiError(res.status, err?.code ?? `http_${res.status}`, err?.message ?? res.statusText, err?.field)
+    const retryAfter = Number(res.headers.get('Retry-After')) || undefined
+    const error = new ApiError(res.status, err?.code ?? `http_${res.status}`, err?.message ?? res.statusText, err?.field, retryAfter)
+    // Any endpoint may rate-limit: one friendly toast here, no automatic retry.
+    if (res.status === 429) onRateLimited?.(error)
+    throw error
   }
   return data as T
 }
@@ -109,7 +112,19 @@ async function getAvatar(): Promise<Blob | null> {
   }
 }
 
+let onRateLimited: ((e: ApiError) => void) | undefined
+
+/** Set by main.ts so the client can show the rate-limit toast without importing stores. */
+export function setRateLimitHandler(fn: (e: ApiError) => void): void {
+  onRateLimited = fn
+}
+
 export const api = {
+  /** 202: the bot sends a CSV and a JSON to the user's chat. 409 bot_blocked, 429 rate_limited. */
+  exportData: () => request<{ sent: boolean }>('POST', '/me/export'),
+  /** Permanently deletes the user and all their data (204). */
+  deleteMe: () => request<void>('DELETE', '/me', { body: { confirm: 'delete' } }),
+
   getAvatar,
   getMe: () => request<User>('GET', '/me'),
   patchMe: (patch: UserPatch) => request<User>('PATCH', '/me', { body: patch }),
@@ -150,8 +165,6 @@ export const api = {
   patchRecurring: (id: number, patch: RecurringPatch) => request<Recurring>('PATCH', `/recurring/${id}`, { body: patch }),
   deleteRecurring: (id: number) => request<void>('DELETE', `/recurring/${id}`),
 
-  getBillingPlans: () => request<BillingPlans>('GET', '/billing/plans'),
-  createInvoice: (plan: PremiumPlan) => request<Invoice>('POST', '/billing/invoice', { body: { plan } }),
 
   listBudgets: (month?: string) => request<BudgetList>('GET', '/budgets', { query: { month } }),
   createBudget: (input: BudgetCreate) => request<Budget>('POST', '/budgets', { body: input }),

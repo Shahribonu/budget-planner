@@ -8,7 +8,8 @@ import AppIcon from './AppIcon.vue'
  * BackButton to close, focus returned to the opener. Sheets can stack (a picker
  * inside a form sheet); only the top one reacts to keys.
  */
-defineProps<{ title: string }>()
+/** `persistent`: can't be dismissed (no close button, backdrop, Escape or Back) until its own action closes it. */
+const props = defineProps<{ title: string; persistent?: boolean }>()
 const open = defineModel<boolean>('open', { required: true })
 defineEmits<{ closed: [] }>()
 
@@ -18,7 +19,7 @@ const sheetId = Symbol('sheet')
 let returnFocus: HTMLElement | null = null
 
 function close() {
-  open.value = false
+  if (!props.persistent) open.value = false
 }
 
 function focusables(): HTMLElement[] {
@@ -50,7 +51,7 @@ function onKeydown(e: KeyboardEvent) {
 function activate() {
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   openSheets.push(sheetId)
-  backButton.show(close)
+  if (!props.persistent) backButton.show(close)
   document.addEventListener('keydown', onKeydown)
   document.body.style.overflow = 'hidden'
   void nextTick(() => {
@@ -99,6 +100,7 @@ const openSheets: symbol[] = []
           <div class="flex shrink-0 items-center gap-2 px-4 pt-2 pb-2">
             <h2 :id="titleId" class="min-w-0 flex-1 truncate text-lg font-semibold">{{ title }}</h2>
             <button
+              v-if="!persistent"
               type="button"
               class="pressable -mr-2 rounded-full p-2 text-hint"
               :aria-label="$t('common.close')"

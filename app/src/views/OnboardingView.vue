@@ -6,6 +6,7 @@ import type { AccountType, Currency, Language } from '@/api/types'
 import AmountInput from '@/components/AmountInput.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import FallbackButton from '@/components/FallbackButton.vue'
+import TermsLinks from '@/components/TermsLinks.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import { useMainButton } from '@/composables/useMainButton'
 import { LANGUAGES, detectLanguage, setLanguage } from '@/i18n'
@@ -107,6 +108,13 @@ async function finish() {
       })
       d.createdId = created.id
     }
+    // Accepted on step 1 (Continue was disabled until then).
+    await user.update({ accept_terms: true })
+    try {
+      sessionStorage.removeItem(TERMS_KEY)
+    } catch {
+      /* storage unavailable */
+    }
     await user.load(true)
     haptic.success()
     await router.replace({ name: 'home' })
@@ -119,7 +127,27 @@ async function finish() {
 }
 
 const buttonText = computed(() => (step.value === 1 ? t('common.next') : t('onboarding.finish')))
-const { native } = useMainButton(buttonText, busy, () => (step.value === 1 ? next() : finish()))
+// Continue stays disabled on step 1 until the Terms and Privacy Policy are accepted.
+// Kept in sessionStorage: opening a legal page from here remounts this view.
+const TERMS_KEY = 'bp.onboarding.terms'
+function readTerms(): boolean {
+  try {
+    return sessionStorage.getItem(TERMS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const termsAccepted = ref(readTerms())
+watch(termsAccepted, (v) => {
+  try {
+    if (v) sessionStorage.setItem(TERMS_KEY, '1')
+    else sessionStorage.removeItem(TERMS_KEY)
+  } catch {
+    /* storage unavailable: the box just needs ticking again */
+  }
+})
+const canContinue = computed(() => step.value === 2 || termsAccepted.value)
+const { native } = useMainButton(buttonText, busy, () => (step.value === 1 ? next() : finish()), ref(true), canContinue)
 
 const toStep1 = () => (step.value = 1)
 watch(step, (s) => (s === 2 ? backButton.show(toStep1) : backButton.hide(toStep1)))
@@ -169,6 +197,18 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
 
       <h2 class="eyebrow mb-2 px-1">{{ $t('onboarding.main_currency') }}</h2>
       <SegmentedControl v-model="mainCurrency" :options="currencyOptions" :label="$t('onboarding.main_currency')" />
+
+      <label class="card mt-6 flex cursor-pointer items-start gap-3 p-4">
+        <input v-model="termsAccepted" type="checkbox" class="peer sr-only" />
+        <span
+          class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent"
+          :class="termsAccepted ? 'border-accent bg-accent text-white' : 'border-hint/50'"
+          aria-hidden="true"
+        >
+          <AppIcon v-if="termsAccepted" name="check" :size="16" />
+        </span>
+        <span class="text-[15px] leading-snug"><TermsLinks /></span>
+      </label>
     </template>
 
     <template v-else>
@@ -241,7 +281,7 @@ const currencyOptions = computed(() => CURRENCIES.map((c) => ({ value: c, label:
     </template>
   </div>
 
-  <FallbackButton v-if="!native" :label="buttonText" :busy="busy" @click="step === 1 ? next() : finish()" />
+  <FallbackButton v-if="!native" :label="buttonText" :busy="busy" :disabled="!canContinue" @click="step === 1 ? next() : finish()" />
 </template>
 
 <style scoped>

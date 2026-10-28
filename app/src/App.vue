@@ -3,6 +3,7 @@ import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ApiError } from '@/api/client'
 import AppToast from '@/components/AppToast.vue'
+import ConsentSheet from '@/components/ConsentSheet.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import TabBar from '@/components/TabBar.vue'
 import { useBack } from '@/composables/useBack'
@@ -45,4 +46,5 @@ function retry() {
   </div>
   <TabBar v-if="route.meta.tabs && user.me" />
   <AppToast />
+  <ConsentSheet v-if="user.me" />
 </template>

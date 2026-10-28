@@ -6,8 +6,10 @@ Personal finance assistant for Uzbekistan as a Telegram bot + Mini App: log spen
 
 ```
 api/openapi.yaml         Mini App API contract
-backend/                 Go modular monolith (API now; bot webhook and job worker later)
-  cmd/server/            HTTP server entry point
+backend/                 Go modular monolith: API, Telegram bot and scheduler in one binary
+  cmd/server/            server entry point; also serves the built Mini App (STATIC_DIR)
+  cmd/loadtest/          simulated Mini App users, latency per route
+  cmd/sttbench/          speech-to-text accuracy on amounts
   internal/api/          HTTP handlers, Telegram init data auth
   internal/auth/         init data HMAC validation
   internal/ledger/       domain service: the only writer of money data (double-entry)
@@ -16,6 +18,8 @@ backend/                 Go modular monolith (API now; bot webhook and job worke
   internal/capture/
     normalizer/          deterministic amount/date parser: "qirq besh ming", "полтора миллиона", "$20"
 app/                     Vue 3 Telegram Mini App
+deploy/                  docker compose: Postgres, app, Caddy (HTTPS), nightly backups
+docs/launch.md           hosting, security review, load test, privacy, launch checklist
 ```
 
 ## Development
@@ -40,6 +44,10 @@ cd app
 cp .env.example .env            # VITE_DEV_TELEGRAM_ID=1 to use dev auth in a browser
 npm install && npm run dev      # proxies /api to :8080
 ```
+
+## Deploy
+
+See [docs/launch.md](docs/launch.md). Short version: `cd deploy && cp .env.example .env`, fill it in, `docker compose up -d --build`.
 
 ## Principles
 

@@ -147,11 +147,6 @@ const HERO_TOP = '#5b3df5'
 onMounted(() => setHeaderTint(HERO_TOP))
 onBeforeUnmount(() => setHeaderTint(null))
 
-const premiumDays = computed(() => {
-  const until = user.me?.premium_until
-  if (!user.me?.premium || !until) return null
-  return Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 86_400_000))
-})
 
 function toggleHidden() {
   haptic.selection()
@@ -236,18 +231,10 @@ const recentGroups = computed(() => {
       <span class="blob blob-2" aria-hidden="true" />
       <span class="blob blob-3" aria-hidden="true" />
 
-      <div class="relative flex items-center justify-between">
-        <RouterLink :to="{ name: 'profile' }" class="pressable rounded-full" :aria-label="$t('tabs.profile')">
-          <UserAvatar :size="42" />
-        </RouterLink>
-        <RouterLink
-          :to="{ name: 'premium' }"
-          class="pressable flex items-center gap-1.5 rounded-full bg-black/25 px-3 py-1.5 text-[11px] font-bold tracking-[0.1em] uppercase backdrop-blur"
-        >
-          <AppIcon name="crown" :size="14" class="text-[#ffd36b]" />
-          {{ $t('premium.title') }}<template v-if="premiumDays"> · {{ $t('home.days_short', { n: premiumDays }) }}</template>
-        </RouterLink>
-      </div>
+      <RouterLink :to="{ name: 'profile' }" class="pressable relative flex w-fit max-w-full items-center gap-3 rounded-full pr-2">
+        <UserAvatar :size="42" />
+        <span class="truncate font-semibold">{{ $t('home.hello', { name: user.me?.first_name ?? '' }) }}</span>
+      </RouterLink>
 
       <div class="rise relative mt-6 text-center" style="--i: 0">
         <p class="text-[11px] font-semibold tracking-[0.22em] text-white/70 uppercase">{{ $t('home.balance') }}</p>

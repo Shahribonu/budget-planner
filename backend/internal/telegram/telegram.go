@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -147,6 +149,11 @@ func (c *Client) call(ctx context.Context, method string, in, out any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, method, out)
+}
+
+// do sends a prepared Bot API request and decodes the response envelope.
+func (c *Client) do(req *http.Request, method string, out any) error {
 	res, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram %s: %w", method, errors.Unwrap(err)) // the URL holds the token; don't log it
@@ -208,23 +215,6 @@ var allowedUpdates = []string{"message", "callback_query", "pre_checkout_query"}
 type LabeledPrice struct {
 	Label  string `json:"label"`
 	Amount int    `json:"amount"`
-}
-
-// Invoice describes a Telegram Stars (XTR) payment. SubscriptionPeriod 2592000 (30 days)
-// makes it a monthly subscription.
-type Invoice struct {
-	Title              string         `json:"title"`
-	Description        string         `json:"description"`
-	Payload            string         `json:"payload"`
-	Currency           string         `json:"currency"`
-	Prices             []LabeledPrice `json:"prices"`
-	SubscriptionPeriod int            `json:"subscription_period,omitempty"`
-}
-
-func (c *Client) CreateInvoiceLink(ctx context.Context, inv Invoice) (string, error) {
-	var link string
-	err := c.call(ctx, "createInvoiceLink", inv, &link)
-	return link, err
 }
 
 func (c *Client) AnswerPreCheckoutQuery(ctx context.Context, id string, ok bool, errMsg string) error {
@@ -313,4 +303,44 @@ func (c *Client) DownloadFile(ctx context.Context, fileID string, maxBytes int64
 		return nil, fmt.Errorf("file too large")
 	}
 	return b, nil
+}
+
+// SendDocument uploads a file into a chat.
+func (c *Client) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("chat_id", strconv.FormatInt(chatID, 10))
+	if caption != "" {
+		_ = mw.WriteField("caption", caption)
+	}
+	fw, err := mw.CreateFormFile("document", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return err
+	}
+	if err := mw.Close(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/sendDocument", &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return c.do(req, "sendDocument", nil)
+}
+
+// SetMyDescription sets the bot's description (shown before /start) and short
+// description (profile and shares) for one language, or the default when languageCode is "".
+func (c *Client) SetMyDescription(ctx context.Context, description, short, languageCode string) error {
+	in := map[string]any{"description": description}
+	sh := map[string]any{"short_description": short}
+	if languageCode != "" {
+		in["language_code"], sh["language_code"] = languageCode, languageCode
+	}
+	if err := c.call(ctx, "setMyDescription", in, nil); err != nil {
+		return err
+	}
+	return c.call(ctx, "setMyShortDescription", sh, nil)
 }

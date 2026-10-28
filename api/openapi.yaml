@@ -9,6 +9,9 @@ info:
     Money is always an integer in ISO 4217 minor units plus a currency code.
     UZS and USD are never added together; totals are reported per currency.
     Dates are calendar dates (YYYY-MM-DD) in the user's time zone.
+
+    Any endpoint may answer 429 `rate_limited` with a `Retry-After` header (seconds):
+    about 10 requests per second per user and 30 per IP address.
 servers:
   - url: /api
 security:
@@ -33,8 +36,31 @@ paths:
                 timezone: { type: string, example: Asia/Tashkent }
                 notify_enabled: { type: boolean, description: Evening summary in the bot }
                 notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: Local time of the evening summary }
+                accept_terms: { type: boolean, const: true, description: Accept the current terms and privacy policy }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+    delete:
+      summary: Delete the account and all data, permanently. The next request starts a new, empty account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: string, const: delete }
+      responses:
+        "204": { description: Deleted }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /me/export:
+    post:
+      summary: "Send the user's data into their bot chat: transactions as CSV and everything as JSON. At most once per 10 minutes."
+      responses:
+        "202": { description: Sent, content: { application/json: { schema: { type: object, required: [sent], properties: { sent: { type: boolean } } } } } }
+        "409": { description: "bot_blocked: the user never started the bot or blocked it", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: "rate_limited: an export was sent within the last 10 minutes", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /me/avatar:
     get:
@@ -345,7 +371,7 @@ paths:
                 amount_minor: { type: integer, format: int64, minimum: 1 }
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Budget" } } } }
-        "422": { description: "Validation failed; code budget_exists for a duplicate, premium_required for a second budget on the free plan", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "Validation failed; code budget_exists for a duplicate", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /budgets/{id}:
     parameters: [{ $ref: "#/components/parameters/Id" }]
@@ -505,38 +531,6 @@ paths:
         "204": { description: Deleted }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /billing/plans:
-    get:
-      summary: Current Premium prices in Telegram Stars, the same the bot shows
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [monthly_stars, yearly_stars, free_budgets]
-                properties:
-                  monthly_stars: { type: integer }
-                  yearly_stars: { type: integer }
-                  free_budgets: { type: integer, description: Budgets allowed on the free plan }
-        "503": { description: Payments not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
-
-  /billing/invoice:
-    post:
-      summary: "A Telegram Stars payment link for Premium. Open it with Telegram.WebApp.openInvoice(url); when the status is 'paid', reload /me. monthly is a 30-day Stars subscription; yearly is a one-time payment for 365 days."
-      requestBody:
-        required: true
-        content: { application/json: { schema: { type: object, required: [plan], properties: { plan: { type: string, enum: [monthly, yearly] } } } } }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { type: object, properties: { url: { type: string }, stars: { type: integer } } }
-        "422": { $ref: "#/components/responses/Invalid" }
-        "503": { description: Payments not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
-
 components:
   securitySchemes:
     tma:
@@ -595,7 +589,7 @@ components:
 
     User:
       type: object
-      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, created_at, premium, premium_until, trial_used]
+      required: [id, telegram_id, first_name, language, main_currency, timezone, onboarded, notify_enabled, notify_time, created_at, terms_accepted]
       properties:
         id: { type: integer, format: int64 }
         telegram_id: { type: integer, format: int64 }
@@ -608,9 +602,7 @@ components:
         notify_enabled: { type: boolean, description: Evening summary in the bot }
         notify_time: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "21:00", description: "HH:MM, local time of the evening summary" }
         created_at: { type: string, format: date-time, description: First contact with the bot or app ("with us since") }
-        premium: { type: boolean, description: Premium is active now (paid or trial) }
-        premium_until: { type: [string, "null"], format: date-time }
-        trial_used: { type: boolean, description: "The one-time 7-day trial (granted after 7 logged days) was already given" }
+        terms_accepted: { type: boolean, description: "Accepted the current version of the terms and privacy policy; when false, ask before continuing" }
 
     Account:
       type: object

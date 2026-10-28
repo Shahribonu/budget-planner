@@ -27,8 +27,17 @@ export const useToastStore = defineStore('toast', () => {
     }, ms)
   }
 
+  // After a rate-limit toast, callers' own generic error toasts would replace it; hold them briefly.
+  let holdUntil = 0
+
   function error(): void {
+    if (Date.now() < holdUntil) return
     show(i18n.global.t('common.error'))
+  }
+
+  function rateLimited(retryAfter?: number): void {
+    show(retryAfter && retryAfter > 0 ? i18n.global.t('common.rate_limited_s', { s: retryAfter }) : i18n.global.t('common.rate_limited'))
+    holdUntil = Date.now() + 1500
   }
 
   async function runAction(): Promise<void> {
@@ -43,5 +52,5 @@ export const useToastStore = defineStore('toast', () => {
     }
   }
 
-  return { current, show, error, runAction }
+  return { current, show, error, rateLimited, runAction }
 })

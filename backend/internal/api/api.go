@@ -18,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Shahribonu/budget-planner/backend/internal/auth"
-	"github.com/Shahribonu/budget-planner/backend/internal/billing"
 	"github.com/Shahribonu/budget-planner/backend/internal/db/dbq"
 	"github.com/Shahribonu/budget-planner/backend/internal/ledger"
 	"github.com/Shahribonu/budget-planner/backend/internal/planning"
@@ -32,10 +31,11 @@ type Config struct {
 	DevAuth bool
 	// TelegramWebhook, when set, is served at POST /telegram/webhook.
 	TelegramWebhook http.Handler
-	// Billing creates Stars invoices; nil disables POST /api/billing/invoice.
-	Billing *billing.Service
-	// Telegram fetches profile photos for GET /api/me/avatar; nil means no photos.
+	// Telegram fetches profile photos for GET /api/me/avatar and sends data exports;
+	// nil disables both.
 	Telegram *telegram.Client
+	// StaticDir, when set, serves the built Mini App (app/dist) at /.
+	StaticDir string
 }
 
 type Server struct {
@@ -45,23 +45,31 @@ type Server struct {
 	ledger *ledger.Service
 	plan   *planning.Service
 	now    func() time.Time
+
+	// authFails counts failed logins per IP. Mobile carriers put many users behind
+	// one address, so only failures are limited by IP; requests are limited per user.
+	authFails, userLimit *limiter
+	users                *userCache
 }
 
 func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 	l := ledger.New(pool)
-	s := &Server{cfg: cfg, pool: pool, q: dbq.New(pool), ledger: l, plan: planning.NewService(pool, l), now: time.Now}
+	s := &Server{cfg: cfg, pool: pool, q: dbq.New(pool), ledger: l, plan: planning.NewService(pool, l), now: time.Now,
+		authFails: newLimiter(1, 20), userLimit: newLimiter(10, 30), users: newUserCache()}
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, requestLog, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.RealIP, requestLog, middleware.Recoverer, securityHeaders)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	if cfg.TelegramWebhook != nil {
 		r.Method(http.MethodPost, "/telegram/webhook", cfg.TelegramWebhook)
 	}
 
 	r.Route("/api", func(r chi.Router) {
-		r.Use(limitBody, s.authenticate)
+		r.Use(limitBody, s.authenticate, s.limitUser)
 		r.Get("/me", s.getMe)
 		r.Patch("/me", s.patchMe)
+		r.Delete("/me", s.deleteMe)
+		r.Post("/me/export", s.exportData)
 		r.Get("/me/avatar", s.avatar)
 		r.Get("/accounts", s.listAccounts)
 		r.Post("/accounts", s.createAccount)
@@ -95,14 +103,40 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 		r.Post("/plan/parse", s.parsePlanText)
 		r.Patch("/plan/items/{id}", s.patchPlanItem)
 		r.Delete("/plan/items/{id}", s.deletePlanItem)
-		r.Get("/billing/plans", s.billingPlans)
-		r.Post("/billing/invoice", s.createInvoice)
 		r.Get("/recurring", s.listRecurring)
 		r.Post("/recurring", s.createRecurring)
 		r.Patch("/recurring/{id}", s.patchRecurring)
 		r.Delete("/recurring/{id}", s.deleteRecurring)
 	})
+	if cfg.StaticDir != "" {
+		r.Handle("/*", staticApp(cfg.StaticDir))
+	}
 	return r
+}
+
+// securityHeaders applies to every response. No X-Frame-Options: Telegram's web
+// clients show the Mini App in an iframe.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// staticApp serves the built Mini App. Hashed files under /assets are cached for a
+// year; everything else, index.html included, is revalidated so deploys show at once.
+func staticApp(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		files.ServeHTTP(w, r)
+	})
 }
 
 // ---- auth ----
@@ -126,21 +160,32 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			err = auth.ErrInvalid
 		}
 		if err != nil || tg.ID <= 0 {
+			// Checked after validation, so failures from a shared address never lock
+			// out the valid users behind it.
+			if !s.authFails.allow(clientIP(r)) {
+				tooMany(w)
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "unauthorized", "", "invalid or expired Telegram init data")
 			return
 		}
-		var username *string
-		if tg.Username != "" {
-			username = &tg.Username
+		id, ok := s.users.get(tg)
+		if !ok {
+			var username *string
+			if tg.Username != "" {
+				username = &tg.Username
+			}
+			u, err := s.q.UpsertUser(r.Context(), dbq.UpsertUserParams{
+				TelegramID: tg.ID, FirstName: tg.FirstName, Username: username, Language: languageFor(tg.LanguageCode),
+			})
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			id = u.ID
+			s.users.put(tg, id)
 		}
-		u, err := s.q.UpsertUser(r.Context(), dbq.UpsertUserParams{
-			TelegramID: tg.ID, FirstName: tg.FirstName, Username: username, Language: languageFor(tg.LanguageCode),
-		})
-		if err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, u.ID)))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
 	})
 }
 

@@ -77,10 +77,3 @@ export function formatMonth(month: string, lang: Language): string {
     parseISO(`${month}-01`),
   )
 }
-
-/** "DD.MM.YYYY" for an instant, in the user's time zone. */
-export function formatDateNumeric(isoDateTime: string, timeZone?: string): string {
-  const day = todayISO(timeZone, new Date(isoDateTime))
-  const [y, m, d] = day.split('-')
-  return `${d}.${m}.${y}`
-}

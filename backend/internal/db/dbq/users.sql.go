@@ -9,8 +9,100 @@ import (
 	"context"
 )
 
+const acceptTerms = `-- name: AcceptTerms :one
+update users set terms_accepted_at = now(), terms_version = $1 where id = $2
+returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at, terms_accepted_at, terms_version, last_export_at
+`
+
+type AcceptTermsParams struct {
+	Version *int32
+	ID      int64
+}
+
+func (q *Queries) AcceptTerms(ctx context.Context, arg AcceptTermsParams) (User, error) {
+	row := q.db.QueryRow(ctx, acceptTerms, arg.Version, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TelegramID,
+		&i.FirstName,
+		&i.Username,
+		&i.Language,
+		&i.MainCurrency,
+		&i.Timezone,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.NotifyEnabled,
+		&i.NotifyTime,
+		&i.LastSummaryOn,
+		&i.ChatMode,
+		&i.ChatModeUntil,
+		&i.PlanPromptedMonth,
+		&i.PremiumUntil,
+		&i.TrialStartedAt,
+		&i.TermsAcceptedAt,
+		&i.TermsVersion,
+		&i.LastExportAt,
+	)
+	return i, err
+}
+
+const claimExport = `-- name: ClaimExport :one
+update users set last_export_at = now()
+where id = $1 and (last_export_at is null or last_export_at < now() - make_interval(secs => $2::int))
+returning telegram_id, language
+`
+
+type ClaimExportParams struct {
+	ID           int64
+	CooldownSecs int32
+}
+
+type ClaimExportRow struct {
+	TelegramID int64
+	Language   string
+}
+
+// Claims the export slot unless one was taken within the cooldown; no row means throttled.
+func (q *Queries) ClaimExport(ctx context.Context, arg ClaimExportParams) (ClaimExportRow, error) {
+	row := q.db.QueryRow(ctx, claimExport, arg.ID, arg.CooldownSecs)
+	var i ClaimExportRow
+	err := row.Scan(&i.TelegramID, &i.Language)
+	return i, err
+}
+
+const deleteUser = `-- name: DeleteUser :exec
+delete from users where id = $1
+`
+
+// Cascades to every other row the user owns. Run after DeleteUserLedger.
+func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
+const deleteUserDrafts = `-- name: DeleteUserDrafts :exec
+delete from drafts where user_id = $1
+`
+
+// Postings and drafts reference accounts and transactions without a cascade,
+// so the ledger goes first: DeleteUserDrafts, DeleteUserTransactions, DeleteUser.
+func (q *Queries) DeleteUserDrafts(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteUserDrafts, id)
+	return err
+}
+
+const deleteUserTransactions = `-- name: DeleteUserTransactions :exec
+delete from transactions where user_id = $1
+`
+
+func (q *Queries) DeleteUserTransactions(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteUserTransactions, id)
+	return err
+}
+
 const getUser = `-- name: GetUser :one
-select id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at from users where id = $1
+select id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at, terms_accepted_at, terms_version, last_export_at from users where id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
@@ -34,8 +126,33 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.PlanPromptedMonth,
 		&i.PremiumUntil,
 		&i.TrialStartedAt,
+		&i.TermsAcceptedAt,
+		&i.TermsVersion,
+		&i.LastExportAt,
 	)
 	return i, err
+}
+
+const purgeOldDrafts = `-- name: PurgeOldDrafts :execrows
+delete from drafts where status <> 'pending' and created_at < now() - interval '7 days'
+`
+
+// Drafts keep the raw message text; drop resolved ones after a week.
+func (q *Queries) PurgeOldDrafts(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeOldDrafts)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const releaseExport = `-- name: ReleaseExport :exec
+update users set last_export_at = null where id = $1
+`
+
+func (q *Queries) ReleaseExport(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, releaseExport, id)
+	return err
 }
 
 const updateUserSettings = `-- name: UpdateUserSettings :one
@@ -44,7 +161,7 @@ set language      = coalesce($1, language),
     main_currency = coalesce($2, main_currency),
     timezone      = coalesce($3, timezone)
 where id = $4
-returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at
+returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at, terms_accepted_at, terms_version, last_export_at
 `
 
 type UpdateUserSettingsParams struct {
@@ -80,6 +197,9 @@ func (q *Queries) UpdateUserSettings(ctx context.Context, arg UpdateUserSettings
 		&i.PlanPromptedMonth,
 		&i.PremiumUntil,
 		&i.TrialStartedAt,
+		&i.TermsAcceptedAt,
+		&i.TermsVersion,
+		&i.LastExportAt,
 	)
 	return i, err
 }
@@ -90,7 +210,7 @@ values ($1, $2, $3, $4)
 on conflict (telegram_id) do update
     set first_name = excluded.first_name,
         username   = excluded.username
-returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at
+returning id, telegram_id, first_name, username, language, main_currency, timezone, created_at, started_at, notify_enabled, notify_time, last_summary_on, chat_mode, chat_mode_until, plan_prompted_month, premium_until, trial_started_at, terms_accepted_at, terms_version, last_export_at
 `
 
 type UpsertUserParams struct {
@@ -126,6 +246,9 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.PlanPromptedMonth,
 		&i.PremiumUntil,
 		&i.TrialStartedAt,
+		&i.TermsAcceptedAt,
+		&i.TermsVersion,
+		&i.LastExportAt,
 	)
 	return i, err
 }

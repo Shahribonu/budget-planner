@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ label: string; busy?: boolean }>()
+defineProps<{ label: string; busy?: boolean; disabled?: boolean }>()
 defineEmits<{ click: [] }>()
 </script>
 
@@ -8,7 +8,7 @@ defineEmits<{ click: [] }>()
     <button
       type="button"
       class="pressable w-full rounded-2xl bg-accent py-4 font-semibold text-on-accent shadow-lg shadow-accent/25 disabled:opacity-60"
-      :disabled="busy"
+      :disabled="busy || disabled"
       @click="$emit('click')"
     >
       {{ busy ? $t('common.loading') : label }}

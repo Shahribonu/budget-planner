@@ -250,4 +250,7 @@ type User struct {
 	PlanPromptedMonth *time.Time
 	PremiumUntil      *time.Time
 	TrialStartedAt    *time.Time
+	TermsAcceptedAt   *time.Time
+	TermsVersion      *int32
+	LastExportAt      *time.Time
 }

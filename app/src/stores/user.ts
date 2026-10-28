@@ -7,6 +7,8 @@ import { currentLanguage, setLanguage } from '@/i18n'
 export const useUserStore = defineStore('user', () => {
   const me = ref<User | null>(null)
   const error = ref<unknown>(null)
+  /** Set once the account is deleted: the app shows the goodbye screen and stops calling the API. */
+  const deleted = ref(false)
   let pending: Promise<User> | null = null
 
   const language = computed(() => me.value?.language ?? currentLanguage())
@@ -38,5 +40,5 @@ export const useUserStore = defineStore('user', () => {
     return apply(await api.patchMe(patch))
   }
 
-  return { me, error, language, mainCurrency, load, update }
+  return { me, error, deleted, language, mainCurrency, load, update }
 })

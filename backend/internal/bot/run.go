@@ -74,6 +74,9 @@ func (b *Bot) SetCommands(ctx context.Context) {
 		if err := b.tg.SetMyCommands(ctx, cmds, code); err != nil {
 			slog.Warn("bot: setMyCommands", "lang", lang, "err", err)
 		}
+		if err := b.tg.SetMyDescription(ctx, i18n.T(lang, "bot.description"), i18n.T(lang, "bot.short"), code); err != nil {
+			slog.Warn("bot: setMyDescription", "lang", lang, "err", err)
+		}
 	}
 }
 
@@ -97,6 +100,9 @@ func (b *Bot) Tick(ctx context.Context) { b.tick(ctx) }
 func (b *Bot) tick(ctx context.Context) {
 	if _, err := b.q.ExpireDrafts(ctx); err != nil {
 		slog.Warn("scheduler: expire drafts", "err", err)
+	}
+	if _, err := b.q.PurgeOldDrafts(ctx); err != nil {
+		slog.Warn("scheduler: purge drafts", "err", err)
 	}
 	b.budgetAlerts(ctx)
 	b.planPrompts(ctx)
@@ -222,12 +228,6 @@ func (b *Bot) sendSummary(ctx context.Context, u dbq.User) {
 	}
 	if due := b.dueLines(ctx, u, day); len(due) > 0 {
 		text += "\n\n" + i18n.T(lang, "due.title") + "\n" + strings.Join(due, "\n")
-	}
-	if until, started, err := b.billing.MaybeStartTrial(ctx, u); err != nil {
-		slog.Warn("scheduler: trial", "err", err)
-	} else if started {
-		text += "\n\n" + i18n.T(lang, "premium.trial", until.In(b.loc(u)).Format("02.01.2006"))
-		b.capture.Event(ctx, u.ID, "trial_started", nil)
 	}
 	kb := &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{{Text: i18n.T(lang, "summary.off"), CallbackData: "n:off"}}}}
 	_, err = b.tg.SendMessage(ctx, telegram.SendMessage{ChatID: u.TelegramID, Text: text, ParseMode: "HTML", ReplyMarkup: kb})

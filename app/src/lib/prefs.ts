@@ -36,3 +36,12 @@ watch(
   },
   { deep: true },
 )
+
+/** Forget everything this app stored on the device (after the account is deleted). */
+export function clearLocalData(): void {
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('bp.')) localStorage.removeItem(k)
+  } catch {
+    /* storage unavailable */
+  }
+}

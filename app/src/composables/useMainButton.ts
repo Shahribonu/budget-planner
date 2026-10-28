@@ -10,18 +10,25 @@ export function useMainButton(
   busy: Readonly<Ref<boolean>>,
   onClick: () => void,
   visible: Readonly<Ref<boolean>> = ref(true),
+  enabled: Readonly<Ref<boolean>> = ref(true),
 ) {
   const handler = () => {
-    if (!busy.value && visible.value) onClick()
+    if (!busy.value && visible.value && enabled.value) onClick()
   }
   onMounted(() => {
     if (!mainButton.available) return
     mainButton.bind(text.value, handler)
     if (!visible.value) mainButton.setVisible(false)
+    if (!enabled.value) mainButton.setEnabled(false)
   })
-  onBeforeUnmount(() => mainButton.available && mainButton.unbind(handler))
+  onBeforeUnmount(() => {
+    if (!mainButton.available) return
+    mainButton.setEnabled(true)
+    mainButton.unbind(handler)
+  })
   watch(text, (t) => mainButton.setText(t))
   watch(busy, (b) => mainButton.setProgress(b))
   watch(visible, (v) => mainButton.setVisible(v))
+  watch(enabled, (e) => mainButton.setEnabled(e))
   return { native: mainButton.available }
 }

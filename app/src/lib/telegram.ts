@@ -4,7 +4,6 @@ import { prefs } from './prefs'
 
 type ImpactStyle = 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'
 type NotificationType = 'error' | 'success' | 'warning'
-export type InvoiceStatus = 'paid' | 'cancelled' | 'failed' | 'pending'
 
 interface BottomButton {
   setText(text: string): BottomButton
@@ -34,13 +33,13 @@ interface WebApp {
   colorScheme: 'light' | 'dark'
   isVersionAtLeast(version: string): boolean
   ready(): void
+  close?(): void
   expand(): void
   disableVerticalSwipes?(): void
   setHeaderColor?(color: string): void
   setBackgroundColor?(color: string): void
   setBottomBarColor?(color: string): void
   showConfirm?(message: string, callback: (ok: boolean) => void): void
-  openInvoice?(url: string, callback: (status: InvoiceStatus) => void): void
   onEvent(event: 'themeChanged', cb: () => void): void
   BackButton: BackButtonApi
   MainButton: BottomButton
@@ -176,15 +175,6 @@ export function confirmDialog(message: string): Promise<boolean> {
   return Promise.resolve(window.confirm(message))
 }
 
-/** Telegram Stars payments need the in-app invoice sheet (Bot API 6.1+). */
-export const canPay = inTelegram && !!webApp?.openInvoice && webApp.isVersionAtLeast('6.1')
-
-export function openInvoice(url: string): Promise<InvoiceStatus> {
-  const open = webApp?.openInvoice
-  if (!canPay || !webApp || !open) return Promise.resolve('failed')
-  return new Promise((resolve) => open.call(webApp, url, resolve))
-}
-
 /** Tint Telegram's header (e.g. violet behind the Home hero); null restores the page colour. */
 export function setHeaderTint(color: string | null): void {
   if (!inTelegram || !webApp || !webApp.isVersionAtLeast('6.9')) return
@@ -195,4 +185,10 @@ export function setHeaderTint(color: string | null): void {
 /** The user's Telegram profile photo, when the client shares it. */
 export function telegramPhotoUrl(): string | undefined {
   return webApp?.initDataUnsafe.user?.photo_url
+}
+
+/** Close the Mini App; outside Telegram, reload so the next start is fresh. */
+export function closeApp(): void {
+  if (inTelegram && webApp?.close) webApp.close()
+  else window.location.replace(window.location.pathname)
 }
