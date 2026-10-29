@@ -29,6 +29,7 @@ import type {
   TransactionInput,
   TransactionPage,
   User,
+  SavingsSummary,
   UserPatch,
   VoiceResult,
 } from './types'
@@ -178,6 +179,8 @@ export const api = {
   patchRecurring: (id: number, patch: RecurringPatch) => request<Recurring>('PATCH', `/recurring/${id}`, { body: patch }),
   deleteRecurring: (id: number) => request<void>('DELETE', `/recurring/${id}`),
 
+
+  getSavings: (months = 12) => request<SavingsSummary>('GET', '/savings', { query: { months } }),
 
   listBudgets: (month?: string) => request<BudgetList>('GET', '/budgets', { query: { month } }),
   createBudget: (input: BudgetCreate) => request<Budget>('POST', '/budgets', { body: input }),

@@ -46,19 +46,17 @@ function isOverdue(p: Installment) {
 }
 
 const add = () => void router.push({ name: 'installment-new' })
+// The one add action on this screen: Telegram's MainButton (FallbackButton outside Telegram).
 const { native } = useMainButton(
   computed(() => t('installments.add')),
   ref(false),
   add,
+  computed(() => !loading.value && !failed.value),
 )
 </script>
 
 <template>
-  <PageHeader :title="$t('installments.title')" back>
-    <button type="button" class="pressable rounded-full p-2 text-link" :aria-label="$t('installments.add')" @click="add">
-      <AppIcon name="plus" />
-    </button>
-  </PageHeader>
+  <PageHeader :title="$t('installments.title')" back />
 
   <div class="space-y-4 px-4 pb-4">
     <SkeletonList v-if="loading" class="-mx-4" />
@@ -67,8 +65,6 @@ const { native } = useMainButton(
       v-else-if="!plans.all.length"
       icon="🛍️"
       :body="$t('installments.empty')"
-      :action="$t('installments.add')"
-      @action="add"
     />
 
     <div v-if="open.length" class="card overflow-hidden py-1">
@@ -128,5 +124,5 @@ const { native } = useMainButton(
     </section>
   </div>
 
-  <FallbackButton v-if="!native && plans.all.length" :label="$t('installments.add')" @click="add" />
+  <FallbackButton v-if="!native && !loading && !failed" :label="$t('installments.add')" @click="add" />
 </template>

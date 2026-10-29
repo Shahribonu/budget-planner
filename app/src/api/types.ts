@@ -436,3 +436,16 @@ export interface VoiceResult {
   text: string
   items: VoiceItem[]
 }
+
+export interface SavingsMonth {
+  month: string
+  currency: Currency
+  put_in_minor: number
+  taken_out_minor: number
+}
+
+/** Money moved into and out of savings accounts per month; months without movement are omitted. */
+export interface SavingsSummary {
+  current_month: string
+  months: SavingsMonth[]
+}

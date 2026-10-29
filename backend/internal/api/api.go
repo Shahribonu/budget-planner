@@ -94,6 +94,7 @@ func New(cfg Config, pool *pgxpool.Pool) http.Handler {
 			r.Delete("/transactions/{id}", s.deleteTransaction)
 			r.Post("/transactions/{id}/restore", s.restoreTransaction)
 			r.Get("/summary", s.summary)
+			r.Get("/savings", s.savings)
 			r.Get("/debts", s.listDebts)
 			r.Post("/debts", s.createDebt)
 			r.Get("/debts/{id}", s.getDebt)

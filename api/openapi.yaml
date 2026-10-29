@@ -237,6 +237,33 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { description: "code overpayment", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  /savings:
+    get:
+      summary: "Money put into and taken out of savings accounts (type savings) per month, for the last N months including the current one. Months without movement are omitted. Opening balances don't count. Balances come from GET /accounts."
+      parameters:
+        - { name: months, in: query, schema: { type: integer, minimum: 1, maximum: 36, default: 12 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [current_month, months]
+                properties:
+                  current_month: { type: string, example: "2026-10", description: "In the user's time zone" }
+                  months:
+                    type: array
+                    items:
+                      type: object
+                      required: [month, currency, put_in_minor, taken_out_minor]
+                      properties:
+                        month: { type: string, example: "2026-10" }
+                        currency: { type: string, enum: [UZS, USD] }
+                        put_in_minor: { type: integer, format: int64 }
+                        taken_out_minor: { type: integer, format: int64 }
+        "400": { description: invalid months, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /summary:
     get:
       summary: Home screen data for one month

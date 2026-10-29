@@ -133,3 +133,56 @@ func (q *Queries) FlowTotals(ctx context.Context, arg FlowTotalsParams) ([]FlowT
 	}
 	return items, nil
 }
+
+const savingsByMonth = `-- name: SavingsByMonth :many
+select to_char(t.occurred_on, 'YYYY-MM')::text as month, p.currency,
+       coalesce(sum(p.amount) filter (where p.amount > 0), 0)::bigint as put_in,
+       coalesce(-sum(p.amount) filter (where p.amount < 0), 0)::bigint as taken_out
+from postings p
+join transactions t on t.id = p.transaction_id
+join accounts a on a.id = p.account_id
+where a.user_id = $1 and a.kind = 'asset' and a.type = 'savings'
+  and t.deleted_at is null and t.type <> 'opening'
+  and t.occurred_on >= $2
+group by 1, p.currency
+order by 1, p.currency
+`
+
+type SavingsByMonthParams struct {
+	UserID   int64
+	FromDate time.Time
+}
+
+type SavingsByMonthRow struct {
+	Month    string
+	Currency string
+	PutIn    int64
+	TakenOut int64
+}
+
+// Money put into (positive postings) and taken out of savings accounts per month.
+// Opening balances are not savings made in that month.
+func (q *Queries) SavingsByMonth(ctx context.Context, arg SavingsByMonthParams) ([]SavingsByMonthRow, error) {
+	rows, err := q.db.Query(ctx, savingsByMonth, arg.UserID, arg.FromDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SavingsByMonthRow
+	for rows.Next() {
+		var i SavingsByMonthRow
+		if err := rows.Scan(
+			&i.Month,
+			&i.Currency,
+			&i.PutIn,
+			&i.TakenOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

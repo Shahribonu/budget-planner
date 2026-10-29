@@ -205,6 +205,7 @@ function changeReminderTime(e: Event) {
       <h2 class="eyebrow mb-2 px-1">{{ $t('profile.group_manage') }}</h2>
       <div class="card divide-y divide-separator overflow-hidden">
         <SettingsRow icon="card" :label="$t('profile.accounts')" :value="String(accounts.active.length)" :to="{ name: 'accounts' }" />
+        <SettingsRow icon="piggy" tone="#13b884" :label="$t('savings.title')" :to="{ name: 'savings' }" />
         <SettingsRow icon="grid" tone="#f5a524" :label="$t('profile.categories')" :value="String(categories.all.length)" :to="{ name: 'categories' }" />
         <SettingsRow icon="repeat" tone="#0f9e6e" :label="$t('mplan.regular')" :to="{ name: 'recurring' }" />
       </div>

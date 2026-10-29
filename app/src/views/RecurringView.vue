@@ -10,11 +10,13 @@ import AppIcon from '@/components/AppIcon.vue'
 import CategoryIcon from '@/components/CategoryIcon.vue'
 import BottomSheet from '@/components/BottomSheet.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import FallbackButton from '@/components/FallbackButton.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PickerField from '@/components/PickerField.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import { invalidField } from '@/composables/useApiError'
 import { useFormat } from '@/composables/useFormat'
+import { useMainButton } from '@/composables/useMainButton'
 import { categoryLabel } from '@/i18n'
 import { ACCOUNT_ICONS } from '@/lib/accounts'
 import { CURRENCIES, currencyLabel, parseAmount, toInputValue } from '@/lib/money'
@@ -183,6 +185,15 @@ async function remove() {
   }
 }
 
+// The one add action on this screen: Telegram's MainButton (FallbackButton outside Telegram),
+// hidden while the sheet, which has its own Save, is open.
+const { native } = useMainButton(
+  computed(() => t('recurring.add')),
+  ref(false),
+  () => openSheet(null),
+  computed(() => !loading.value && !failed.value && !sheetOpen.value),
+)
+
 /** Income and bills feed the plan, so it has to recalculate. */
 function refreshPlan() {
   if (plan.view) void plan.load().catch(() => {})
@@ -190,11 +201,7 @@ function refreshPlan() {
 </script>
 
 <template>
-  <PageHeader :title="$t('recurring.title')" back>
-    <button type="button" class="pressable rounded-full p-2 text-link" :aria-label="$t('recurring.add')" @click="openSheet(null)">
-      <AppIcon name="plus" />
-    </button>
-  </PageHeader>
+  <PageHeader :title="$t('recurring.title')" back />
 
   <div class="space-y-4 px-4 pb-6">
     <SkeletonList v-if="loading" class="-mx-4" />
@@ -203,8 +210,6 @@ function refreshPlan() {
       v-else-if="!items.length"
       icon="🔁"
       :body="$t('recurring.empty')"
-      :action="$t('mplan.add_salary_btn')"
-      @action="openSheet(null, 'income')"
     />
 
     <section v-for="g in groups" :key="g.kind">
@@ -232,6 +237,8 @@ function refreshPlan() {
       </div>
     </section>
   </div>
+
+  <FallbackButton v-if="!native && !loading && !failed" :label="$t('recurring.add')" @click="openSheet(null)" />
 
   <BottomSheet v-model:open="sheetOpen" :title="editing ? editing.title : $t('recurring.new')">
     <form class="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pt-2 pb-4" novalidate @submit.prevent="save">

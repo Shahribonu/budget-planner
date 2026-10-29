@@ -24,6 +24,7 @@ export const router = createRouter({
     { path: '/categories', name: 'categories', component: () => import('@/views/CategoriesView.vue'), meta: { sub: true } },
     { path: '/legal/:doc(privacy|terms)', name: 'legal', component: () => import('@/views/LegalView.vue'), meta: { sub: true, public: true } },
     { path: '/deleted', name: 'deleted', component: () => import('@/views/DeletedView.vue'), meta: { public: true } },
+    { path: '/savings', name: 'savings', component: () => import('@/views/SavingsView.vue'), meta: { sub: true } },
     { path: '/recurring', name: 'recurring', component: () => import('@/views/RecurringView.vue'), meta: { sub: true } },
     { path: '/debts', name: 'debts', component: () => import('@/views/DebtsView.vue'), meta: { sub: true } },
     { path: '/debts/new', name: 'debt-new', component: () => import('@/views/DebtFormView.vue'), meta: { sub: true } },

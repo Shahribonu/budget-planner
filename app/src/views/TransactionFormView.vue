@@ -30,6 +30,7 @@ import { useLedgerStore } from '@/stores/ledger'
 import { useToastStore } from '@/stores/toast'
 import { useUserStore } from '@/stores/user'
 import { useVoiceStore } from '@/stores/voice'
+import { rememberSavings } from '@/stores/savings'
 
 const INPUT_TYPES: InputTransactionType[] = ['expense', 'income', 'transfer', 'exchange']
 
@@ -170,6 +171,18 @@ function fillFromVoice(): boolean {
   return true
 }
 
+/** ?from= / ?to= (e.g. "Put aside" into savings) choose the transfer's accounts. */
+function applyQueryAccounts() {
+  const usable = (v: unknown) => {
+    const id = Number(v)
+    return accounts.active.some((a) => a.id === id) ? id : null
+  }
+  const from = usable(route.query.from)
+  const to = usable(route.query.to)
+  if (from) accountId.value = from
+  if (to && to !== accountId.value) toAccountId.value = to
+}
+
 async function load() {
   loading.value = true
   loadFailed.value = false
@@ -185,7 +198,10 @@ async function load() {
       return
     }
     if (tx) fill(tx)
-    else if (!fillFromVoice()) pickDefaultAccount()
+    else if (!fillFromVoice()) {
+      pickDefaultAccount()
+      applyQueryAccounts()
+    }
     loading.value = false
     fixDependents()
   } catch {
@@ -261,7 +277,11 @@ async function save() {
     await ledger.save(editId, input)
     haptic.success()
     try {
-      localStorage.setItem(LAST_ACCOUNT_KEY, String(input.account_id))
+      // Remember the savings account used, for the next "Put aside".
+      const savingsLeg = [input.account_id, input.to_account_id].find((id) => id && accounts.byId.get(id)?.type === 'savings')
+      if (savingsLeg) rememberSavings(savingsLeg)
+      // A savings account isn't a spending default (e.g. after "Take out").
+      if (accounts.byId.get(input.account_id)?.type !== 'savings') localStorage.setItem(LAST_ACCOUNT_KEY, String(input.account_id))
     } catch {
       /* storage unavailable */
     }

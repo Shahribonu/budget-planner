@@ -10,12 +10,15 @@ import { useBack } from '@/composables/useBack'
 import { backButton } from '@/lib/telegram'
 import { useUserStore } from '@/stores/user'
 import { useVoiceStore } from '@/stores/voice'
+import { useSavingsStore } from '@/stores/savings'
 
 const route = useRoute()
 const user = useUserStore()
 const voice = useVoiceStore()
 // Loaded on the first mic tap; the recorder itself is created in that tap (see stores/voice).
 const VoiceSheet = defineAsyncComponent(() => import('@/components/VoiceSheet.vue'))
+const savings = useSavingsStore()
+const CreateSavingsSheet = defineAsyncComponent(() => import('@/components/CreateSavingsSheet.vue'))
 const goBack = useBack()
 
 watch(
@@ -52,4 +55,5 @@ function retry() {
   <AppToast />
   <ConsentSheet v-if="user.me" />
   <VoiceSheet v-if="voice.open" />
+  <CreateSavingsSheet v-if="savings.createOpen" />
 </template>

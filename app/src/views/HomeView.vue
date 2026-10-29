@@ -10,6 +10,7 @@ import BudgetBar from '@/components/BudgetBar.vue'
 import DonutChart, { type DonutSlice } from '@/components/DonutChart.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import PullIndicator from '@/components/PullIndicator.vue'
+import SavingsCard from '@/components/SavingsCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import TxRow from '@/components/TxRow.vue'
 import { useCountUp } from '@/composables/useCountUp'
@@ -27,6 +28,7 @@ import { useBudgetsStore } from '@/stores/budgets'
 import { useCategoriesStore } from '@/stores/categories'
 import { useInstallmentsStore } from '@/stores/installments'
 import { useLedgerStore } from '@/stores/ledger'
+import { useSavingsStore } from '@/stores/savings'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -37,6 +39,7 @@ const accounts = useAccountsStore()
 const categories = useCategoriesStore()
 const budgets = useBudgetsStore()
 const plans = useInstallmentsStore()
+const savings = useSavingsStore()
 const { money, lang, today, dayLabel } = useFormat()
 
 const failed = ref(false)
@@ -47,6 +50,7 @@ async function refresh() {
     // Only used to word debt rows in Recent; Home works without them.
     void plans.load().catch(() => {})
     void budgets.load(true).catch(() => {})
+    void savings.load().catch(() => {})
     void loadPlanRow(ledger.summary?.month)
     void loadWeek()
     failed.value = false
@@ -61,6 +65,8 @@ const summary = computed(() => ledger.summary)
 
 // "Plan: N fit · M later" for this month, only when the plan has items.
 const planRow = ref<{ fit: number; later: number } | null>(null)
+/** The plan's monthly savings target, for the savings card; null without a plan. */
+const plannedSavings = ref<Money | null>(null)
 async function loadPlanRow(month?: string) {
   try {
     // create=false: a preview must not create (and carry over into) this month's plan; 404 hides the row.
@@ -68,8 +74,10 @@ async function loadPlanRow(month?: string) {
     const planned = v.items.filter((i) => i.status === 'planned')
     const fit = planned.filter((i) => i.decision?.group === 'fits').length
     planRow.value = planned.length ? { fit, later: planned.length - fit } : null
+    plannedSavings.value = v.inputs.savings_minor > 0 ? { amount_minor: v.inputs.savings_minor, currency: v.currency } : null
   } catch {
     planRow.value = null
+    plannedSavings.value = null
   }
 }
 const range = computed(() => (summary.value ? monthRange(summary.value.month) : null))
@@ -322,6 +330,8 @@ const recentGroups = computed(() => {
     </div>
 
     <div class="space-y-6 px-4 pt-2">
+      <SavingsCard :planned="plannedSavings" class="rise" style="--i: 4" />
+
       <!-- Insight strip -->
       <div v-if="!isEmpty" class="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none]">
         <button
@@ -358,8 +368,6 @@ const recentGroups = computed(() => {
           art="wallet"
           :title="$t('home.empty_title')"
           :body="$t('home.empty_body')"
-          :action="$t('home.empty_cta')"
-          @action="router.push({ name: 'tx-new', query: { type: 'expense' } })"
         />
       </div>
 
