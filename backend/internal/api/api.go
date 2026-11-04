@@ -28,6 +28,8 @@ import (
 
 type Config struct {
 	BotToken string
+	// Allowed limits the Mini App to these Telegram users; empty allows everyone.
+	Allowed auth.Allowlist
 	// DevAuth accepts "Authorization: dev <telegram id>" for local development
 	// outside Telegram. Never enable in production.
 	DevAuth bool
@@ -181,6 +183,10 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 				return
 			}
 			writeError(w, http.StatusUnauthorized, "unauthorized", "", "invalid or expired Telegram init data")
+			return
+		}
+		if !s.cfg.Allowed.Allows(tg.ID) {
+			writeError(w, http.StatusForbidden, "forbidden", "", "this app is private")
 			return
 		}
 		id, ok := s.users.get(tg)

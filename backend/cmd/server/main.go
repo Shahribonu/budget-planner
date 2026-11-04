@@ -16,6 +16,7 @@ import (
 	_ "time/tzdata" // user time zones work in minimal images without zoneinfo
 
 	"github.com/Shahribonu/budget-planner/backend/internal/api"
+	"github.com/Shahribonu/budget-planner/backend/internal/auth"
 	"github.com/Shahribonu/budget-planner/backend/internal/bot"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/llm"
@@ -70,8 +71,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	allowed, err := auth.ParseAllowlist(os.Getenv("ALLOWED_TELEGRAM_IDS"))
+	if err != nil {
+		return err
+	}
+	if len(allowed) > 0 {
+		slog.Info("access limited to ALLOWED_TELEGRAM_IDS", "users", len(allowed))
+	}
 	capt := capture.New(pool, l, ai)
-	cfg := api.Config{BotToken: botToken, DevAuth: env == "development", StaticDir: os.Getenv("STATIC_DIR"),
+	cfg := api.Config{BotToken: botToken, Allowed: allowed, DevAuth: env == "development", StaticDir: os.Getenv("STATIC_DIR"),
 		Voice: transcriber, Capture: capt}
 	if botToken != "" {
 		cfg.Telegram = telegram.New(botToken)
@@ -79,7 +87,7 @@ func run() error {
 
 	if botToken != "" {
 		tg := telegram.New(botToken)
-		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL")}, tg, pool, capt, planning.NewService(pool, l), transcriber)
+		b := bot.New(bot.Config{MiniAppURL: os.Getenv("MINIAPP_URL"), Allowed: allowed}, tg, pool, capt, planning.NewService(pool, l), transcriber)
 		mode := getenv("BOT_MODE", map[bool]string{true: "polling", false: "webhook"}[env == "development"])
 		switch mode {
 		case "polling":

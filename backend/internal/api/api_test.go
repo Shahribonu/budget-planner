@@ -340,3 +340,18 @@ func TestPlanEndToEnd(t *testing.T) {
 		t.Errorf("recurring left = %d", n)
 	}
 }
+
+func TestAllowlistLimitsMiniApp(t *testing.T) {
+	pool := testdb.Pool(t)
+	owner := rand.Int64N(1 << 50)
+	srv := httptest.NewServer(api.New(api.Config{BotToken: botToken, Allowed: auth.Allowlist{owner: true}}, pool))
+	defer srv.Close()
+
+	newClient(t, srv, owner).do("GET", "/api/me", nil, http.StatusOK)
+	stranger := owner + 1
+	newClient(t, srv, stranger).do("GET", "/api/me", nil, http.StatusForbidden)
+	var n int
+	if err := pool.QueryRow(t.Context(), "select count(*) from users where telegram_id = $1", stranger).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("stranger got an account: %d %v", n, err)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Shahribonu/budget-planner/backend/internal/auth"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/bank"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
@@ -34,6 +35,9 @@ const (
 type Config struct {
 	// MiniAppURL is the public HTTPS URL of the Mini App; empty hides app buttons.
 	MiniAppURL string
+	// Allowed limits the bot to these Telegram users; others are ignored without a
+	// reply and get no account. Empty allows everyone.
+	Allowed auth.Allowlist
 }
 
 type Bot struct {
@@ -80,6 +84,10 @@ func (b *Bot) HandleUpdate(ctx context.Context, upd telegram.Update) {
 		from, chat, kind = &upd.CallbackQuery.From, upd.CallbackQuery.Message.Chat, "callback"
 	}
 	if from == nil || from.IsBot || chat.Type != "private" || kind == "" {
+		return
+	}
+	if !b.cfg.Allowed.Allows(from.ID) {
+		slog.Info("bot: ignored user not in ALLOWED_TELEGRAM_IDS", "telegram_id", from.ID)
 		return
 	}
 

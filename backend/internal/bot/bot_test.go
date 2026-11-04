@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Shahribonu/budget-planner/backend/internal/auth"
 	"github.com/Shahribonu/budget-planner/backend/internal/bot"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture"
 	"github.com/Shahribonu/budget-planner/backend/internal/capture/stt"
@@ -525,5 +526,33 @@ func TestWebhookRejectsWrongSecret(t *testing.T) {
 	}
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d", res.StatusCode)
+	}
+}
+
+func TestAllowlistIgnoresStrangers(t *testing.T) {
+	pool := testdb.Pool(t)
+	fake := &fakeTelegram{}
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+	l := ledger.New(pool)
+	tg := telegram.New("TOKEN").WithBaseURL(srv.URL)
+	owner := rand.Int64N(1 << 50)
+	b := bot.New(bot.Config{Allowed: auth.Allowlist{owner: true}}, tg, pool, capture.New(pool, l, nil), planning.NewService(pool, l), stt.None{})
+	h := &harness{t: t, b: b, tg: fake, userID: owner + 1, update: rand.Int64N(1 << 40)}
+
+	b.HandleUpdate(ctx, h.message("/start"))
+	b.HandleUpdate(ctx, h.message("taksi 25000"))
+	if calls := fake.take(); len(calls) != 0 {
+		t.Fatalf("stranger got replies: %v", calls)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, "select count(*) from users where telegram_id = $1", h.userID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("stranger got an account: %d %v", n, err)
+	}
+
+	h.userID = owner
+	b.HandleUpdate(ctx, h.message("/start"))
+	if len(sent(fake.take(), "sendMessage")) == 0 {
+		t.Fatal("owner got no reply")
 	}
 }
