@@ -8,3 +8,13 @@
 		header_up -True-Client-IP
 	}
 }
+
+# ibodat (github.com/Shahribonu/daily-prayer), its own compose stack on the shared "web" network.
+prayer.92-5-91-174.sslip.io {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy ibodat-app:8080 {
+		header_up -X-Real-IP
+		header_up -True-Client-IP
+	}
+}

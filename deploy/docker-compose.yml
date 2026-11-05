@@ -37,6 +37,8 @@ services:
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
       DOMAIN: ${DOMAIN}
+    # "web" is shared with ibodat's stack; create it once: docker network create web
+    networks: [default, web]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -55,6 +57,10 @@ services:
       - ./backup.sh:/backup.sh:ro
       - ./backups:/backups
     entrypoint: ["sh", "/backup.sh"]
+
+networks:
+  web:
+    external: true
 
 volumes:
   pgdata:
